@@ -1,0 +1,988 @@
+use eframe::egui;
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SceneObject {
+    name: String,
+    kind: String,
+    position: [f32; 3],
+    visible: bool,
+}
+#[derive(Serialize, Deserialize)]
+struct Project {
+    name: String,
+    version: String,
+    dimension: String,
+    startup_scene: String,
+    objects: Vec<SceneObject>,
+    scripts: Vec<String>,
+    assets: Vec<String>,
+}
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            name: "Meu primeiro jogo".into(),
+            version: "0.2.0".into(),
+            dimension: "3D".into(),
+            startup_scene: "Main".into(),
+            objects: vec![
+                SceneObject {
+                    name: "Camera".into(),
+                    kind: "Camera3D".into(),
+                    position: [0.0, 2.0, 6.0],
+                    visible: true,
+                },
+                SceneObject {
+                    name: "DirectionalLight".into(),
+                    kind: "Light".into(),
+                    position: [2.0, 4.0, 1.0],
+                    visible: true,
+                },
+                SceneObject {
+                    name: "Cube".into(),
+                    kind: "Mesh3D".into(),
+                    position: [0.0, 0.0, 0.0],
+                    visible: true,
+                },
+            ],
+            scripts: vec![],
+            assets: vec![],
+        }
+    }
+}
+struct RevEngineApp {
+    project: Project,
+    project_path: Option<PathBuf>,
+    selected: usize,
+    status: String,
+    tab: String,
+    new_name: String,
+    new_dimension: String,
+    script_language: String,
+    script_name: String,
+    ai_provider: String,
+    ai_key: String,
+    provider_keys: std::collections::HashMap<String, String>,
+    ai_model: String,
+    ai_endpoint: String,
+    show_new: bool,
+    show_about: bool,
+    chat_input: String,
+    chat_history: Vec<(String, String)>,
+    chat_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    chat_busy: bool,
+    blender_path: String,
+}
+impl Default for RevEngineApp {
+    fn default() -> Self {
+        Self {
+            project: Project::default(),
+            project_path: None,
+            selected: 0,
+            status: "Bem-vindo à RevEngine. Crie um projeto para começar.".into(),
+            tab: "Scene".into(),
+            new_name: "Meu jogo".into(),
+            new_dimension: "3D".into(),
+            script_language: "Rust".into(),
+            script_name: "player_controller".into(),
+            ai_provider: "NVIDIA".into(),
+            ai_key: String::new(),
+            provider_keys: std::collections::HashMap::new(),
+            ai_model: "nvidia/nemotron-3.5-lightning-30b-a3b".into(),
+            ai_endpoint: "https://integrate.api.nvidia.com/v1".into(),
+            show_new: false,
+            show_about: false,
+            chat_input: String::new(),
+            chat_history: vec![("RevAI".into(), "Olá! Sou o assistente da RevEngine. Descreva seu jogo, peça scripts ou gere personagens, cenários e assets com o Blender. Exemplo: monte um elfo de fantasia detalhado e exporte em GLB.".into())],
+            chat_rx: None,
+            chat_busy: false,
+            blender_path: String::new(),
+        }
+    }
+}
+impl RevEngineApp {
+    fn save(&mut self) {
+        if self.project_path.is_none() {
+            if let Some(p) = rfd::FileDialog::new().set_directory(".").pick_folder() {
+                self.project_path = Some(p);
+            } else {
+                self.status = "Salvamento cancelado.".into();
+                return;
+            }
+        }
+        let root = self.project_path.as_ref().unwrap();
+        let _ = fs::create_dir_all(root.join("Scenes"));
+        let _ = fs::create_dir_all(root.join("Scripts"));
+        let _ = fs::create_dir_all(root.join("Assets"));
+        let _ = fs::create_dir_all(root.join("Build"));
+        match serde_json::to_string_pretty(&self.project)
+            .and_then(|s| fs::write(root.join("project.rev"), s).map_err(serde_json::Error::io))
+        {
+            Ok(()) => self.status = format!("Projeto salvo: {}", root.display()),
+            Err(e) => self.status = format!("Erro ao salvar: {e}"),
+        }
+    }
+    fn open(&mut self) {
+        if let Some(file) = rfd::FileDialog::new()
+            .add_filter("Projeto RevEngine", &["rev"])
+            .pick_file()
+        {
+            match fs::read_to_string(&file)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Project>(&s).ok())
+            {
+                Some(p) => {
+                    self.project = p;
+                    self.project_path = file.parent().map(Path::to_path_buf);
+                    self.selected = 0;
+                    self.status = format!("Projeto aberto: {}", file.display());
+                }
+                None => self.status = "Não foi possível ler este projeto RevEngine.".into(),
+            }
+        }
+    }
+    fn create_project(&mut self) {
+        if let Some(root) = rfd::FileDialog::new().set_directory(".").pick_folder() {
+            let dir = root.join(self.new_name.trim().replace(['\\', '/'], "_"));
+            match fs::create_dir_all(&dir) {
+                Ok(()) => {
+                    self.project = Project::default();
+                    self.project.name = self.new_name.clone();
+                    self.project.dimension = self.new_dimension.clone();
+                    self.project_path = Some(dir.clone());
+                    self.selected = 0;
+                    for d in ["Scenes", "Scripts", "Assets", "Build", "Plugins"] {
+                        let _ = fs::create_dir_all(dir.join(d));
+                    }
+                    self.save();
+                    self.status = format!("Projeto {} criado.", self.project.name);
+                }
+                Err(e) => self.status = format!("Falha ao criar projeto: {e}"),
+            }
+        }
+        self.show_new = false;
+    }
+    fn add_object(&mut self, kind: &str) {
+        self.project.objects.push(SceneObject {
+            name: format!("{}{}", kind, self.project.objects.len() + 1),
+            kind: kind.into(),
+            position: [0.0, 0.0, 0.0],
+            visible: true,
+        });
+        self.selected = self.project.objects.len() - 1;
+    }
+    fn import_asset(&mut self) {
+        let Some(root) = self.project_path.clone() else {
+            self.status = "Salve o projeto antes de importar assets.".into();
+            return;
+        };
+        if let Some(file) = rfd::FileDialog::new().pick_file() {
+            let target = root
+                .join("Assets")
+                .join(file.file_name().unwrap_or_default());
+            match fs::copy(&file, &target) {
+                Ok(_) => {
+                    self.project
+                        .assets
+                        .push(target.file_name().unwrap().to_string_lossy().into());
+                    self.status = format!("Asset importado: {}", target.display());
+                }
+                Err(e) => self.status = format!("Erro ao importar: {e}"),
+            }
+        }
+    }
+    fn create_script(&mut self) {
+        let Some(root) = self.project_path.clone() else {
+            self.status = "Salve o projeto antes de criar scripts.".into();
+            return;
+        };
+        let ext = match self.script_language.as_str() {
+            "Rust" => "rs",
+            "C++" => "cpp",
+            "C" => "c",
+            "C#" => "cs",
+            "Lua" => "lua",
+            "Python" => "py",
+            "JavaScript" => "js",
+            "TypeScript" => "ts",
+            "GDScript" => "gd",
+            "WGSL" => "wgsl",
+            "GLSL" => "glsl",
+            "HLSL" => "hlsl",
+            _ => "txt",
+        };
+        let body = match self.script_language.as_str() {
+            "Rust" => {
+                "// RevEngine gameplay module\npub fn update(delta_seconds: f32) {\n    let _ = delta_seconds;\n}\n"
+            }
+            "C++" => {
+                "// RevEngine native gameplay module\nvoid update(float delta_seconds) {\n    (void)delta_seconds;\n}\n"
+            }
+            "Lua" => "-- RevEngine gameplay script\nfunction update(delta_seconds)\nend\n",
+            "Python" => {
+                "# RevEngine tools/gameplay script\ndef update(delta_seconds: float):\n    pass\n"
+            }
+            "JavaScript" | "TypeScript" => {
+                "// RevEngine gameplay script\nexport function update(deltaSeconds) {\n}\n"
+            }
+            "GDScript" => "extends Node\n\nfunc _process(delta: float) -> void:\n    pass\n",
+            _ => {
+                "// RevEngine script. Configure a compatible runtime/compiler to execute this language.\n"
+            }
+        };
+        let file = format!("{}.{}", self.script_name.trim().replace(' ', "_"), ext);
+        match fs::write(root.join("Scripts").join(&file), body) {
+            Ok(()) => {
+                self.project.scripts.push(file.clone());
+                self.status = format!("Script criado: Scripts/{file}")
+            }
+            Err(e) => self.status = format!("Erro ao criar script: {e}"),
+        }
+    }
+    fn run_blender(&mut self) {
+        let candidates = [
+            self.blender_path.clone(),
+            std::env::var("BLENDER_EXE").unwrap_or_default(),
+            r"F:\blender\blender.exe".into(),
+            r"C:\Program Files\Blender Foundation\Blender 5.3\blender.exe".into(),
+            r"C:\Program Files\Blender Foundation\Blender 4.5\blender.exe".into(),
+        ];
+        let exe = candidates
+            .into_iter()
+            .find(|p| !p.is_empty() && Path::new(p).exists());
+        let Some(exe) = exe else {
+            self.status = "Blender não encontrado. Instale o Blender ou defina BLENDER_EXE.".into();
+            return;
+        };
+        self.blender_path = exe.clone();
+        let Some(root) = self.project_path.clone() else {
+            self.status = "Salve o projeto antes de executar o bridge do Blender.".into();
+            return;
+        };
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("blender")
+            .join("revengine_scene_export.py");
+        let output = root.join("Assets").join("blender_scene.glb");
+        let result = std::process::Command::new(&exe)
+            .args(["--background", "--python"])
+            .arg(script)
+            .arg("--")
+            .arg(&output)
+            .status();
+        self.status = match result {
+            Ok(s) if s.success() => format!("Blender exportou: {}", output.display()),
+            Ok(s) => format!("Blender encerrou com código {s}"),
+            Err(e) => format!("Falha ao iniciar Blender: {e}"),
+        };
+        if output.exists() {
+            self.project.assets.push("blender_scene.glb".into());
+        }
+    }
+    fn send_chat(&mut self) {
+        if self.chat_busy {
+            return;
+        }
+        let prompt = self.chat_input.trim().to_string();
+        if prompt.is_empty() {
+            return;
+        }
+        let env_name = match self.ai_provider.as_str() {
+            "NVIDIA" => "NVIDIA_API_KEY",
+            "OpenAI / ChatGPT" => "OPENAI_API_KEY",
+            "Claude" => "ANTHROPIC_API_KEY",
+            "DeepSeek" => "DEEPSEEK_API_KEY",
+            _ => "REVENGINE_AI_API_KEY",
+        };
+        let key = if self.ai_key.trim().is_empty() {
+            std::env::var(env_name).unwrap_or_default()
+        } else {
+            self.ai_key.clone()
+        };
+        if key.is_empty() && self.ai_provider != "Modelo local" {
+            self.chat_history.push(("RevAI".into(),"Configure a chave do provedor no painel. A chave fica somente na memória desta sessão.".into()));
+            self.chat_input.clear();
+            return;
+        }
+        let provider = self.ai_provider.clone();
+        let model = self.ai_model.clone();
+        let base = self.ai_endpoint.trim_end_matches('/').to_string();
+        let root = self.project_path.clone();
+        let bridge = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("blender")
+            .join("revengine_bridge.py");
+        let mut candidates = vec![PathBuf::from(r"F:\blender\blender.exe")];
+        if let Ok(v) = std::env::var("BLENDER_EXE") {
+            candidates.push(PathBuf::from(v));
+        }
+        for v in [
+            r"C:\Program Files\Blender Foundation\Blender 5.3\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 4.5\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 4.4\blender.exe",
+            r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe",
+        ] {
+            candidates.push(PathBuf::from(v));
+        }
+        let blender = candidates.into_iter().find(|p| p.exists());
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.chat_history.push(("Você".into(), prompt.clone()));
+        self.chat_history.push((
+            "RevAI".into(),
+            "Analisando pedido e preparando o projeto...".into(),
+        ));
+        self.chat_input.clear();
+        self.chat_rx = Some(rx);
+        self.chat_busy = true;
+        std::thread::spawn(move || {
+            let result = (|| -> Result<String, String> {
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(240))
+                    .build()
+                    .map_err(|e| e.to_string())?;
+                let system = r#"Você é RevAI, agente autônomo de criação de jogos da RevEngine. Responda com um único objeto JSON puro, sem markdown, contendo message (texto em português), files (array com path relativo e content integral) e blender_actions (array de operações Blender). Nunca use caminhos absolutos nem .. nos arquivos. Para personagens, criaturas, cenários e modelos 3D use ações Blender. Operações permitidas: create_elf; new_scene; add_mesh (shape cube/sphere/cylinder/cone/torus/monkey, name, location, size); add_material (object,name,color,metallic,roughness); add_camera; add_light (light_type,location,power); render; export (GLB/FBX/OBJ). Para pedido de elfo, crie corpo, rosto, orelhas pontudas, cabelo, roupas, materiais, luzes, câmera, render e GLB. Não diga que executou algo se não incluiu a ação no JSON."#;
+                let url = if provider == "Claude" {
+                    format!("{base}/messages")
+                } else {
+                    format!("{base}/chat/completions")
+                };
+                let response = if provider == "Claude" {
+                    client.post(&url).header("x-api-key",&key).header("anthropic-version","2023-06-01").json(&serde_json::json!({"model":model,"max_tokens":5000,"system":system,"messages":[{"role":"user","content":prompt}]})).send().map_err(|e|e.to_string())?
+                } else {
+                    client.post(&url).bearer_auth(&key).json(&serde_json::json!({"model":model,"messages":[{"role":"system","content":system},{"role":"user","content":prompt}],"temperature":0.25,"max_tokens":5000})).send().map_err(|e|e.to_string())?
+                };
+                let status = response.status();
+                let body = response.text().map_err(|e| e.to_string())?;
+                if !status.is_success() {
+                    return Err(format!(
+                        "HTTP {status}: {}",
+                        body.chars().take(1500).collect::<String>()
+                    ));
+                }
+                let v: serde_json::Value =
+                    serde_json::from_str(&body).map_err(|e| e.to_string())?;
+                let raw = if provider == "Claude" {
+                    v["content"][0]["text"].as_str().unwrap_or("").to_string()
+                } else {
+                    v["choices"][0]["message"]["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string()
+                };
+                let trimmed = raw.trim();
+                let fence = std::iter::repeat(char::from(96))
+                    .take(3)
+                    .collect::<String>();
+                let without_open = trimmed
+                    .strip_prefix(&format!("{fence}json"))
+                    .or_else(|| trimmed.strip_prefix(&fence))
+                    .unwrap_or(trimmed)
+                    .trim();
+                let clean = without_open
+                    .strip_suffix(&fence)
+                    .unwrap_or(without_open)
+                    .trim();
+                let payload: serde_json::Value = serde_json::from_str(clean).map_err(|e| {
+                    format!(
+                        "Modelo não retornou JSON válido: {e}. {}",
+                        raw.chars().take(500).collect::<String>()
+                    )
+                })?;
+                let mut answer = payload["message"]
+                    .as_str()
+                    .unwrap_or("Resposta recebida.")
+                    .to_string();
+                if let Some(root) = root.as_ref() {
+                    if let Some(files) = payload["files"].as_array() {
+                        let mut saved = vec![];
+                        for item in files {
+                            if let (Some(rel), Some(content)) =
+                                (item["path"].as_str(), item["content"].as_str())
+                            {
+                                let p = Path::new(rel);
+                                if is_safe_relative_path(rel) {
+                                    let target = root.join(p);
+                                    if let Some(parent) = target.parent() {
+                                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                                    }
+                                    fs::write(&target, content).map_err(|e| e.to_string())?;
+                                    saved.push(rel.to_string());
+                                }
+                            }
+                        }
+                        if !saved.is_empty() {
+                            answer
+                                .push_str(&format!("\n\nArquivos gravados:\n{}", saved.join("\n")));
+                        }
+                    }
+                    if let Some(actions) = payload["blender_actions"].as_array() {
+                        if !actions.is_empty() {
+                            if let Some(exe) = blender.as_ref() {
+                                let control = root.join(".revengine");
+                                fs::create_dir_all(&control).map_err(|e| e.to_string())?;
+                                let plan = control.join("blender_plan.json");
+                                fs::write(
+                                    &plan,
+                                    serde_json::to_vec_pretty(
+                                        &serde_json::json!({"actions":actions}),
+                                    )
+                                    .map_err(|e| e.to_string())?,
+                                )
+                                .map_err(|e| e.to_string())?;
+                                let out = std::process::Command::new(exe)
+                                    .args(["--background", "--python"])
+                                    .arg(&bridge)
+                                    .arg("--")
+                                    .arg("--plan")
+                                    .arg(&plan)
+                                    .arg("--project")
+                                    .arg(root)
+                                    .output()
+                                    .map_err(|e| e.to_string())?;
+                                if out.status.success() {
+                                    answer.push_str("\n\nBlender concluiu:\n");
+                                    answer.push_str(
+                                        &String::from_utf8_lossy(&out.stdout)
+                                            .chars()
+                                            .take(1800)
+                                            .collect::<String>(),
+                                    );
+                                } else {
+                                    answer.push_str(&format!(
+                                        "\n\nErro do Blender:\n{}",
+                                        String::from_utf8_lossy(&out.stderr)
+                                            .chars()
+                                            .take(1800)
+                                            .collect::<String>()
+                                    ));
+                                }
+                            } else {
+                                answer.push_str("\n\nBlender não encontrado. Instale-o ou configure BLENDER_EXE.");
+                            }
+                        }
+                    }
+                } else if payload["files"]
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false)
+                    || payload["blender_actions"]
+                        .as_array()
+                        .map(|a| !a.is_empty())
+                        .unwrap_or(false)
+                {
+                    answer.push_str(
+                        "\n\nAbra ou salve um projeto para permitir criação de arquivos e assets.",
+                    );
+                }
+                Ok(answer)
+            })();
+            let _ = tx.send(result);
+        });
+    }
+    fn import_blender(&mut self) {
+        let Some(root) = self.project_path.clone() else {
+            self.status = "Salve o projeto antes de importar arquivos do Blender.".into();
+            return;
+        };
+        if let Some(file) = rfd::FileDialog::new()
+            .add_filter(
+                "Blender / modelos 3D",
+                &["blend", "fbx", "obj", "gltf", "glb"],
+            )
+            .pick_file()
+        {
+            let target = root
+                .join("Assets")
+                .join(file.file_name().unwrap_or_default());
+            match fs::copy(&file, &target) {
+                Ok(_) => {
+                    self.project
+                        .assets
+                        .push(target.file_name().unwrap().to_string_lossy().into());
+                    self.status = format!("Arquivo 3D importado para Assets: {}", target.display());
+                }
+                Err(e) => self.status = format!("Erro: {e}"),
+            }
+        }
+    }
+}
+impl eframe::App for RevEngineApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let panel = egui::Color32::from_rgb(20, 23, 31);
+        let accent = egui::Color32::from_rgb(104, 139, 255);
+        egui::TopBottomPanel::top("top")
+            .frame(egui::Frame::default().fill(panel).inner_margin(10.0))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(
+                        egui::RichText::new("◈ REVENGINE")
+                            .color(accent)
+                            .strong()
+                            .size(21.0),
+                    );
+                    ui.separator();
+                    if ui.button("＋ Novo").clicked() {
+                        self.show_new = true;
+                    }
+                    if ui.button("Abrir").clicked() {
+                        self.open();
+                    }
+                    if ui.button("Salvar").clicked() {
+                        self.save();
+                    }
+                    if ui.button("▶ Executar").clicked() {
+                        self.status =
+                            "Runtime de jogo: o núcleo de execução ainda está em desenvolvimento."
+                                .into();
+                    }
+                    if ui.button("Assets").clicked() {
+                        self.import_asset();
+                    }
+                    if ui.button("Blender ▶").clicked() {
+                        self.run_blender();
+                    }
+                    if ui.button("Blender").clicked() {
+                        self.import_blender();
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Sobre").clicked() {
+                            self.show_about = true;
+                        }
+                        ui.label(
+                            egui::RichText::new("INDIE GAME CREATION")
+                                .small()
+                                .color(egui::Color32::GRAY),
+                        );
+                    });
+                });
+            });
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("●");
+                ui.label(&self.status);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!(
+                        "{}  •  {}",
+                        self.project.dimension, self.project.version
+                    ));
+                });
+            });
+        });
+        egui::SidePanel::left("hierarchy")
+            .resizable(true)
+            .default_width(205.0)
+            .show(ctx, |ui| {
+                ui.heading("CENA / HIERARQUIA");
+                ui.label(egui::RichText::new(&self.project.startup_scene).color(accent));
+                ui.horizontal_wrapped(|ui| {
+                    if ui.small_button("+ Objeto").clicked() {
+                        self.add_object("Node");
+                    }
+                    if ui.small_button("+ Mesh").clicked() {
+                        self.add_object("Mesh3D");
+                    }
+                    if ui.small_button("+ Luz").clicked() {
+                        self.add_object("Light");
+                    }
+                    if ui.small_button("+ Camera").clicked() {
+                        self.add_object("Camera");
+                    }
+                });
+                ui.separator();
+                for (i, o) in self.project.objects.iter().enumerate() {
+                    if ui
+                        .selectable_label(
+                            self.selected == i,
+                            format!("{}  {}", if o.visible { "◈" } else { "○" }, o.name),
+                        )
+                        .clicked()
+                    {
+                        self.selected = i;
+                    }
+                }
+                ui.separator();
+                ui.heading("ARQUIVOS");
+                if ui
+                    .selectable_label(self.tab == "Assets", "▧ Assets")
+                    .clicked()
+                {
+                    self.tab = "Assets".into();
+                }
+                if ui
+                    .selectable_label(self.tab == "Scripts", "⌘ Scripts")
+                    .clicked()
+                {
+                    self.tab = "Scripts".into();
+                }
+                if ui.selectable_label(self.tab == "Scene", "◇ Cena").clicked() {
+                    self.tab = "Scene".into();
+                }
+            });
+        egui::SidePanel::right("inspector")
+            .resizable(true)
+            .default_width(430.0)
+            .min_width(360.0)
+            .show(ctx, |ui| {
+                ui.heading("INSPETOR");
+                ui.separator();
+                if let Some(o) = self.project.objects.get_mut(self.selected) {
+                    ui.label("Nome");
+                    ui.text_edit_singleline(&mut o.name);
+                    ui.label("Tipo");
+                    ui.monospace(&o.kind);
+                    ui.checkbox(&mut o.visible, "Visível");
+                    ui.separator();
+                    ui.label("Transform");
+                    for (n, v) in ["X", "Y", "Z"].iter().zip(o.position.iter_mut()) {
+                        ui.add(egui::Slider::new(v, -100.0..=100.0).text(*n));
+                    }
+                    if ui.button("Remover objeto").clicked() {
+                        self.project.objects.remove(self.selected);
+                        self.selected = self
+                            .selected
+                            .min(self.project.objects.len().saturating_sub(1));
+                    }
+                } else {
+                    ui.label("Selecione um objeto na hierarquia.");
+                }
+                ui.separator();
+                ui.heading("PROJETO");
+                ui.label(&self.project.name);
+                ui.label(format!("{} objetos", self.project.objects.len()));
+                ui.label(format!("{} assets", self.project.assets.len()));
+                ui.separator();
+                ui.heading(egui::RichText::new("✦ REVAI CHAT").color(accent).strong());
+                let previous_provider = self.ai_provider.clone();
+                egui::ComboBox::from_id_salt("provider_dock")
+                    .selected_text(&self.ai_provider)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for n in [
+                            "NVIDIA",
+                            "OpenAI / ChatGPT",
+                            "Claude",
+                            "DeepSeek",
+                            "Modelo local",
+                        ] {
+                            if ui
+                                .selectable_value(&mut self.ai_provider, n.into(), n)
+                                .clicked()
+                            {
+                                self.provider_keys
+                                    .insert(previous_provider.clone(), self.ai_key.clone());
+                                self.ai_key = self
+                                    .provider_keys
+                                    .get(&self.ai_provider)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                match self.ai_provider.as_str() {
+                                    "NVIDIA" => {
+                                        self.ai_endpoint =
+                                            "https://integrate.api.nvidia.com/v1".into();
+                                        self.ai_model =
+                                            "nvidia/nemotron-3.5-lightning-30b-a3b".into();
+                                    }
+                                    "OpenAI / ChatGPT" => {
+                                        self.ai_endpoint = "https://api.openai.com/v1".into();
+                                        self.ai_model = "gpt-4o-mini".into();
+                                    }
+                                    "Claude" => {
+                                        self.ai_endpoint = "https://api.anthropic.com/v1".into();
+                                        self.ai_model = "claude-sonnet-4-5".into();
+                                    }
+                                    "DeepSeek" => {
+                                        self.ai_endpoint = "https://api.deepseek.com/v1".into();
+                                        self.ai_model = "deepseek-chat".into();
+                                    }
+                                    _ => {
+                                        self.ai_endpoint = "http://localhost:1234/v1".into();
+                                        self.ai_model = "local-model".into();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                ui.label("Modelo da IA");
+                ui.text_edit_singleline(&mut self.ai_model);
+                ui.label("Endpoint base");
+                ui.text_edit_singleline(&mut self.ai_endpoint);
+                ui.label("API key (temporária)");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.ai_key)
+                        .password(true)
+                        .desired_width(ui.available_width()),
+                );
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        for (role, msg) in &self.chat_history {
+                            ui.group(|ui| {
+                                ui.label(egui::RichText::new(role).strong().color(
+                                    if role == "Você" {
+                                        accent
+                                    } else {
+                                        egui::Color32::from_rgb(170, 140, 255)
+                                    },
+                                ));
+                                ui.label(msg);
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.chat_input)
+                        .desired_rows(3)
+                        .hint_text("Ex.: monte um elfo ultra realista no Blender"),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!self.chat_busy, egui::Button::new("➤ Enviar"))
+                        .clicked()
+                    {
+                        self.send_chat();
+                    }
+                    if self.chat_busy {
+                        ui.spinner();
+                        ui.label("IA / Blender...");
+                    }
+                    if ui.small_button("Limpar").clicked() {
+                        self.chat_history.clear();
+                    }
+                });
+                ui.label(
+                    egui::RichText::new("Chave não é salva no projeto.")
+                        .small()
+                        .color(egui::Color32::GRAY),
+                );
+            });
+        egui::CentralPanel::default().show(ctx,|ui|{
+            ui.horizontal(|ui|{ui.heading("VIEWPORT");ui.separator();ui.selectable_value(&mut self.project.dimension,"3D".into(),"3D");ui.selectable_value(&mut self.project.dimension,"2D".into(),"2D");ui.separator();ui.label("Perspectiva • Editor");});
+            ui.separator();
+            let (rect,response)=ui.allocate_exact_size(ui.available_size(),egui::Sense::click_and_drag());
+            let p=ui.painter_at(rect);p.rect_filled(rect,6.0,egui::Color32::from_rgb(13,16,23));
+            let center=rect.center();
+            for i in -12..=12 {
+                let x=center.x+i as f32*28.0; let y=center.y+i as f32*28.0;
+                p.line_segment([egui::pos2(x,rect.top()),egui::pos2(x,rect.bottom())],egui::Stroke::new(0.5_f32,egui::Color32::from_gray(35)));
+                p.line_segment([egui::pos2(rect.left(),y),egui::pos2(rect.right(),y)],egui::Stroke::new(0.5_f32,egui::Color32::from_gray(35)));
+            }
+            p.line_segment([egui::pos2(rect.left(),center.y),egui::pos2(rect.right(),center.y)],egui::Stroke::new(1.0_f32,egui::Color32::from_rgb(130,55,55)));
+            p.line_segment([egui::pos2(center.x,rect.top()),egui::pos2(center.x,rect.bottom())],egui::Stroke::new(1.0_f32,egui::Color32::from_rgb(55,130,85)));
+            if self.project.dimension=="3D" {
+                let c=center+egui::vec2(0.0,-12.0);
+                p.add(egui::Shape::convex_polygon(vec![c+egui::vec2(0.0,-65.0),c+egui::vec2(65.0,-28.0),c+egui::vec2(0.0,8.0),c+egui::vec2(-65.0,-28.0)],egui::Color32::from_rgb(65,83,119),egui::Stroke::new(1.5_f32,accent)));
+                p.add(egui::Shape::convex_polygon(vec![c+egui::vec2(-65.0,-28.0),c+egui::vec2(0.0,8.0),c+egui::vec2(0.0,75.0),c+egui::vec2(-65.0,38.0)],egui::Color32::from_rgb(43,56,82),egui::Stroke::new(1.5_f32,accent)));
+                p.add(egui::Shape::convex_polygon(vec![c+egui::vec2(0.0,8.0),c+egui::vec2(65.0,-28.0),c+egui::vec2(65.0,38.0),c+egui::vec2(0.0,75.0)],egui::Color32::from_rgb(52,68,100),egui::Stroke::new(1.5_f32,accent)));
+            } else {p.rect_stroke(egui::Rect::from_center_size(center,egui::vec2(180.0,110.0)),4.0,egui::Stroke::new(2.0_f32,accent),egui::StrokeKind::Middle);}
+            p.text(rect.left_top()+egui::vec2(14.0,14.0),egui::Align2::LEFT_TOP,format!("{}  |  {}",self.project.name,self.project.dimension),egui::FontId::proportional(13.0),egui::Color32::LIGHT_GRAY);
+            if response.double_clicked(){self.status="Viewport selecionado. Ferramentas de edição 3D avançadas serão adicionadas nos próximos módulos.".into();}
+            if self.tab=="Assets" {ui.label("Assets importados");for a in &self.project.assets{ui.label(format!("▧ {a}"));}}
+            if self.tab=="Scripts" {ui.label("Scripts do projeto");for s in &self.project.scripts{ui.label(format!("⌘ {s}"));}}
+        });
+        if self.show_new {
+            egui::Window::new("Criar projeto")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("Nome do projeto");
+                    ui.text_edit_singleline(&mut self.new_name);
+                    ui.label("Tipo de jogo");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.new_dimension, "3D".into(), "3D");
+                        ui.selectable_value(&mut self.new_dimension, "2D".into(), "2D");
+                    });
+                    if ui.button("Criar projeto").clicked() {
+                        self.create_project();
+                    }
+                    if ui.button("Cancelar").clicked() {
+                        self.show_new = false;
+                    }
+                });
+        }
+        let completed = self.chat_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(result) = completed {
+            let answer = match result {
+                Ok(raw) => {
+                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        let message = payload["message"].as_str().unwrap_or("Resposta recebida.");
+                        let mut written = Vec::new();
+                        if let Some(root) = self.project_path.clone() {
+                            if let Some(files) = payload["files"].as_array() {
+                                for item in files {
+                                    if let (Some(rel), Some(content)) =
+                                        (item["path"].as_str(), item["content"].as_str())
+                                    {
+                                        let rel_path = Path::new(rel);
+                                        if !rel_path.is_absolute()
+                                            && !rel_path.components().any(|c| {
+                                                matches!(
+                                                    c,
+                                                    std::path::Component::ParentDir
+                                                        | std::path::Component::RootDir
+                                                        | std::path::Component::Prefix(_)
+                                                )
+                                            })
+                                        {
+                                            let target = root.join(rel_path);
+                                            if let Some(parent) = target.parent() {
+                                                let _ = fs::create_dir_all(parent);
+                                            }
+                                            match fs::write(&target, content) {
+                                                Ok(()) => written.push(rel.to_string()),
+                                                Err(e) => written.push(format!("ERRO {rel}: {e}")),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if written.is_empty() {
+                            message.to_string()
+                        } else {
+                            format!(
+                                "{message}\\n\\nArquivos gravados no projeto:\\n{}",
+                                written.join("\\n")
+                            )
+                        }
+                    } else {
+                        raw
+                    }
+                }
+                Err(e) => format!("Falha na API: {e}"),
+            };
+            if let Some(last) = self.chat_history.last_mut() {
+                last.1 = answer;
+            }
+            self.chat_busy = false;
+            self.chat_rx = None;
+        }
+
+        if self.show_about {
+            egui::Window::new("Sobre a RevEngine").show(ctx, |ui| {
+                ui.heading("RevEngine Studio 0.2.0");
+                ui.label("Editor experimental de criação de jogos 2D e 3D.");
+                ui.label("Núcleo em Rust • Interface egui • Projetos JSON • Importação de assets.");
+                ui.label(
+                    "Ainda não é uma engine de produção nem possui runtime/renderizador completo.",
+                );
+                if ui.button("Fechar").clicked() {
+                    self.show_about = false;
+                }
+            });
+        }
+        egui::TopBottomPanel::bottom("quick").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Criar script:");
+                ui.text_edit_singleline(&mut self.script_name);
+                egui::ComboBox::from_id_salt("lang")
+                    .selected_text(&self.script_language)
+                    .show_ui(ui, |ui| {
+                        for l in [
+                            "Rust",
+                            "C++",
+                            "C",
+                            "C#",
+                            "Lua",
+                            "Python",
+                            "JavaScript",
+                            "TypeScript",
+                            "GDScript",
+                            "WGSL",
+                            "GLSL",
+                            "HLSL",
+                        ] {
+                            ui.selectable_value(&mut self.script_language, l.into(), l);
+                        }
+                    });
+                if ui.button("+ Script").clicked() {
+                    self.create_script();
+                }
+            });
+        });
+    }
+}
+fn main() -> eframe::Result<()> {
+    let icon_image =
+        image::load_from_memory(include_bytes!("../assets/branding/revengine-icon.png"))
+            .expect("RevEngine app icon is missing")
+            .into_rgba8();
+    let (icon_width, icon_height) = icon_image.dimensions();
+    let icon = egui::IconData {
+        rgba: icon_image.into_raw(),
+        width: icon_width,
+        height: icon_height,
+    };
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1660.0, 980.0])
+            .with_min_inner_size([1200.0, 760.0])
+            .with_title("RevEngine Studio")
+            .with_icon(std::sync::Arc::new(icon)),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "RevEngine Studio",
+        options,
+        Box::new(|_cc| Ok(Box::new(RevEngineApp::default()))),
+    )
+}
+
+fn is_safe_relative_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.trim().is_empty()
+        && !path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_project_relative_asset_path() {
+        assert!(is_safe_relative_path("Assets/Characters/elf.glb"));
+    }
+
+    #[test]
+    fn rejects_parent_directory_traversal() {
+        assert!(!is_safe_relative_path("../outside.txt"));
+        assert!(!is_safe_relative_path("Scripts/../../outside.txt"));
+    }
+
+    #[test]
+    fn rejects_absolute_paths_and_empty_paths() {
+        assert!(!is_safe_relative_path(r"C:\Windows\system.ini"));
+        assert!(!is_safe_relative_path(""));
+    }
+
+    #[test]
+    fn project_starts_with_camera_and_mesh() {
+        let project = Project::default();
+        assert!(project.objects.iter().any(|o| o.kind == "Camera3D"));
+        assert!(project.objects.iter().any(|o| o.kind == "Mesh3D"));
+    }
+
+    #[test]
+    fn branding_and_blender_bridge_are_packaged() {
+        assert!(!include_bytes!("../assets/branding/revengine-icon.png").is_empty());
+        assert!(
+            Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/blender/revengine_bridge.py"
+            ))
+            .exists()
+        );
+    }
+}

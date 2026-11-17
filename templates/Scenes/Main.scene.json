@@ -1,0 +1,8 @@
+{
+  "name": "Main",
+  "models": [],
+  "objects": [
+    {"name":"Ground","kind":"plane","position":[0.0,-0.1,0.0],"size":20.0,"color":[0.12,0.15,0.2,1.0],"physics":false},
+    {"name":"StarterCube","kind":"cube","position":[0.0,1.0,0.0],"size":1.8,"color":[0.12,0.42,0.88,1.0],"physics":true}
+  ]
+}

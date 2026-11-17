@@ -1,0 +1,13 @@
+[package]
+name = "revengine"
+version = "0.2.0"
+edition = "2024"
+description = "RevEngine - indie 2D/3D game creation environment"
+
+[dependencies]
+eframe = { version = "0.31", features = ["default_fonts", "glow"] }
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }

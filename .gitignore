@@ -1,0 +1,8 @@
+/target/
+*.log
+.env
+.env.*
+!.env.example
+*.blend1
+*.blend2
+.revengine/
