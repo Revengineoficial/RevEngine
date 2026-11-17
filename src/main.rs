@@ -1400,6 +1400,11 @@ REGRAS FUNDAMENTAIS:
                                                                     )
                                                                 })
                                                         });
+                                                        if is_elf {
+                                                            remove_character_placeholder_objects(
+                                                                &mut scene_json,
+                                                            );
+                                                        }
                                                         let model_path = if is_elf {
                                                             let elf_source = generated_dir
                                                                 .join("revengine_elf.glb");
@@ -1563,6 +1568,20 @@ REGRAS FUNDAMENTAIS:
             })();
 
             let _ = tx.send(result);
+        });
+    }
+}
+
+fn remove_character_placeholder_objects(scene_json: &mut serde_json::Value) {
+    if let Some(objects) = scene_json["objects"].as_array_mut() {
+        objects.retain(|object| {
+            let name = object
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            !["HeroCube", "Base", "Player", "Cube"]
+                .iter()
+                .any(|placeholder| name.eq_ignore_ascii_case(placeholder))
         });
     }
 }
@@ -3313,6 +3332,13 @@ mod tests {
                 .iter()
                 .any(|entity| entity.name == "HeroCube")
         );
+        let mut old_ai_scene = serde_json::json!({"objects":[
+            {"name":"HeroCube","kind":"cube"},
+            {"name":"Elf_Cloak","kind":"sphere"}
+        ]});
+        remove_character_placeholder_objects(&mut old_ai_scene);
+        assert_eq!(old_ai_scene["objects"].as_array().unwrap().len(), 1);
+        assert_eq!(old_ai_scene["objects"][0]["name"], "Elf_Cloak");
     }
 
     #[test]
