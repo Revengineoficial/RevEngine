@@ -1,41 +1,57 @@
 # RevEngine 0.2.0-pre-alpha.1
 
-**Status:** pre-alpha — experimental build for early testing. Not a stable release.
+**Canal:** pre-alpha / testes iniciais
+**Plataforma compilada:** Windows x64
+**Aviso:** build experimental. Faça backup dos projetos antes de testar.
 
-## What is included
+## O que há nesta build
 
-- Native Rust desktop editor built with egui/eframe.
-- 3D scene editing viewport and scene/project serialization.
-- Procedural scene generation and AI-provider configuration.
-- Blender bridge and project scaffolding.
-- Import/export bridges for Godot, Roblox, Unity and Unreal project formats.
-- Dependency doctor and asset optimization helpers.
+- Editor desktop em Rust/egui com viewport 3D, hierarquia, inspetor, console e navegador de assets.
+- Projetos `.rev`, cenas JSON e estrutura de projeto com runtime Bevy 0.16 + Rapier 3D.
+- RevAI com provedores configuráveis e geração assistida de arquivos/cenas.
+- Ponte Blender para reconstruir primitivas, exportar GLB e gerar prévia PNG usando renderização Cycles em CPU.
+- Exportadores/conversores experimentais para Godot, Unity, Unreal, Roblox, C++, C# e Lua.
 
-## Validation performed
+## Correções incluídas nesta revisão
 
-- `cargo check --all-targets` — passed.
-- `cargo test --all-targets` — 19 passed, 0 failed.
-- `cargo clippy --all-targets` — completed with non-fatal style warnings; see known limitations.
-- `cargo build --release` — passed on Windows x64.
-- `cargo fmt --all` — applied.
+- Encerramento do processo do runtime e dos processos filhos ao usar Stop; detecção de término espontâneo.
+- Carregamento da cena de inicialização indicada no projeto e aviso visível quando a cena falha ao abrir.
+- Busca de assets funcional e erros de importação apresentados no console.
+- Salvamento de configurações com tratamento de erros real.
+- Escape seguro de nomes ao gerar scripts Python para Blender.
+- Prévia Blender realmente carregada como textura no viewport.
+- Descoberta da ponte Blender relativa ao executável, para builds distribuídas com a pasta `blender`.
+- Blender executado sem pipe de stderr bloqueante; falhas do processo são comunicadas ao RevAI.
+- Render de prévia usa Cycles em CPU para evitar a falha Vulkan/EEVEE observada neste PC.
 
-## Known limitations
+## Validação nesta máquina
 
-- This is a pre-alpha build. Expect incomplete workflows, rough UI edges, and possible crashes or data loss; back up projects before testing.
-- Clippy reports remaining style warnings (mostly nested-if simplifications and minor idioms). They do not currently prevent compilation.
-- Blender workflows require a compatible Blender installation and a configured executable path.
-- AI features require a valid API key and a compatible provider endpoint/model; no API credentials are bundled.
-- External engine import/export compatibility depends on the target engine version and project structure. Validate generated projects in the target application.
-- Automated tests cover core parsing, path safety, project scaffolding, procedural scenes and integration bridges; they do not replace interactive GUI, GPU/driver, Blender, or end-to-end testing.
+- `cargo fmt --all` — aplicado.
+- `cargo check --all-targets` — aprovado.
+- `cargo test --all-targets` — 21 testes aprovados.
+- Blender 5.3.0 — teste headless de exportação GLB e render PNG aprovado.
+- `cargo clippy --all-targets` — executado; ainda há avisos de estilo não bloqueantes.
+- `cargo build --release` — build Windows x64 otimizado concluído.
 
-## Windows quick start
+A interface foi aberta e inspecionada visualmente. Não foi possível certificar individualmente todos os botões, diálogos, provedores de IA ou engines externas. Teste cada fluxo no seu ambiente antes de usar em produção.
 
-1. Download and extract the Windows x64 package.
-2. Run `RevEngine.exe`.
-3. Create a new project and save it in a writable folder.
-4. Configure Blender and AI provider credentials in Settings only if those integrations are needed.
-5. Keep backups of all projects while testing this pre-alpha.
+## Como iniciar
 
-## Feedback
+1. Extraia o ZIP inteiro para uma pasta gravável.
+2. Mantenha a pasta `blender` ao lado de `RevEngine.exe` para habilitar a ponte do Blender.
+3. Execute `Start RevEngine.bat` ou `RevEngine.exe`.
+4. Configure Blender e o provedor de IA em Configurações se for usar esses recursos.
+5. Crie um projeto e teste os fluxos com cópias dos seus arquivos.
 
-When reporting a bug, include Windows version, GPU/driver, steps to reproduce, expected vs. actual behavior, and logs if available. Do not include API keys or other secrets.
+## Limitações conhecidas
+
+- O viewport do editor é uma visualização simplificada, não um renderizador PBR final.
+- O runtime Bevy/Rapier é um template inicial e ainda não reproduz todas as propriedades do editor.
+- Exportações para engines externas podem exigir ajustes manuais, plugins e validação na versão instalada.
+- A importação de modelos 3D copia o arquivo e cria uma referência; não garante importação completa de geometria e materiais para o viewport.
+- As chaves de API ficam em `%APPDATA%\RevEngine\settings.json` sem criptografia integrada nesta pre-alpha. Proteja esse arquivo.
+- Recursos de IA dependem de rede, credenciais e limites do provedor; revise os arquivos gerados.
+
+## Relato de bugs
+
+Inclua Windows, CPU/GPU, driver, passos para reproduzir e logs relevantes. Remova senhas, tokens e chaves de API antes de compartilhar qualquer arquivo ou captura.

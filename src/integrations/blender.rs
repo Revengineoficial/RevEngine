@@ -1,6 +1,10 @@
 use crate::scene::Scene;
 use std::{fs, path::Path, process::Command};
 
+fn python_string_literal(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into())
+}
+
 pub struct BlenderBridge;
 
 impl BlenderBridge {
@@ -16,7 +20,6 @@ bpy.ops.object.delete(use_global=False)
 
 def create_mat(name, color, metallic=0.1, roughness=0.5):
     m = bpy.data.materials.new(name)
-    m.use_nodes = True
     bsdf = m.node_tree.nodes.get("Principled BSDF")
     if bsdf:
         bsdf.inputs["Base Color"].default_value = (color[0], color[1], color[2], 1.0)
@@ -32,6 +35,8 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
             let s = ent.transform.scale;
             let c = ent.material.color;
             let name_clean = ent.name.replace(' ', "_");
+            let py_name = python_string_literal(&name_clean);
+            let py_material_name = python_string_literal(&format!("mat_{name_clean}"));
 
             match ent.kind.as_str() {
                 "plane" => {
@@ -40,12 +45,12 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
                         s[0].max(s[2]), p[0], -p[2], p[1]
                     ));
                     py.push_str(&format!(
-                        "obj = bpy.context.object; obj.name = '{}'\n",
-                        name_clean
+                        "obj = bpy.context.object; obj.name = {}\n",
+                        py_name
                     ));
                     py.push_str(&format!(
-                        "obj.data.materials.append(create_mat('mat_{}', [{:.3}, {:.3}, {:.3}], {:.2}, {:.2}))\n\n",
-                        name_clean, c[0], c[1], c[2], ent.material.metallic, ent.material.roughness
+                        "obj.data.materials.append(create_mat({}, [{:.3}, {:.3}, {:.3}], {:.2}, {:.2}))\n\n",
+                        py_material_name, c[0], c[1], c[2], ent.material.metallic, ent.material.roughness
                     ));
                 }
 
@@ -55,12 +60,12 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
                         s[0] * 0.5, p[0], -p[2], p[1]
                     ));
                     py.push_str(&format!(
-                        "obj = bpy.context.object; obj.name = '{}'\n",
-                        name_clean
+                        "obj = bpy.context.object; obj.name = {}\n",
+                        py_name
                     ));
                     py.push_str(&format!(
-                        "obj.data.materials.append(create_mat('mat_{}', [{:.3}, {:.3}, {:.3}], {:.2}, {:.2}))\n\n",
-                        name_clean, c[0], c[1], c[2], ent.material.metallic, ent.material.roughness
+                        "obj.data.materials.append(create_mat({}, [{:.3}, {:.3}, {:.3}], {:.2}, {:.2}))\n\n",
+                        py_material_name, c[0], c[1], c[2], ent.material.metallic, ent.material.roughness
                     ));
                 }
 
@@ -70,8 +75,8 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
                         p[0], -p[2], p[1]
                     ));
                     py.push_str(&format!(
-                        "obj = bpy.context.object; obj.name = '{}'; obj.data.energy = 5.0\n\n",
-                        name_clean
+                        "obj = bpy.context.object; obj.name = {}; obj.data.energy = 5.0\n\n",
+                        py_name
                     ));
                 }
 
@@ -81,8 +86,8 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
                         p[0], -p[2], p[1]
                     ));
                     py.push_str(&format!(
-                        "obj = bpy.context.object; obj.name = '{}'\n\n",
-                        name_clean
+                        "obj = bpy.context.object; obj.name = {}; obj.rotation_euler = (math.radians(68), 0.0, 0.0); bpy.context.scene.camera = obj\n\n",
+                        py_name
                     ));
                 }
 
@@ -93,21 +98,31 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
                         p[0], -p[2], p[1]
                     ));
                     py.push_str(&format!(
-                        "obj = bpy.context.object; obj.name = '{}'\nobj.scale = ({:.3}, {:.3}, {:.3})\n",
-                        name_clean, s[0], s[2], s[1]
+                        "obj = bpy.context.object; obj.name = {}\nobj.scale = ({:.3}, {:.3}, {:.3})\n",
+                        py_name, s[0], s[2], s[1]
                     ));
                     py.push_str(&format!(
-                        "obj.data.materials.append(create_mat('mat_{}', [{:.3}, {:.3}, {:.3}], {:.2}, {:.2}))\n\n",
-                        name_clean, c[0], c[1], c[2], ent.material.metallic, ent.material.roughness
+                        "obj.data.materials.append(create_mat({}, [{:.3}, {:.3}, {:.3}], {:.2}, {:.2}))\n\n",
+                        py_material_name, c[0], c[1], c[2], ent.material.metallic, ent.material.roughness
                     ));
                 }
             }
         }
 
         let glb_path_str = output_glb.to_string_lossy().replace('\\', "/");
+        let py_glb_path = python_string_literal(&glb_path_str);
+        let py_log_path = python_string_literal(&glb_path_str);
         py.push_str(&format!(
-            "bpy.ops.export_scene.gltf(filepath='{}', export_format='GLB')\nprint('◈ RevEngine GLB export completed: {}')\n",
-            glb_path_str, glb_path_str
+            "bpy.ops.export_scene.gltf(filepath={}, export_format='GLB')\nprint('◈ RevEngine GLB export completed: ' + {})\n",
+            py_glb_path, py_log_path
+        ));
+
+        let render_path = output_glb.with_file_name("blender_scene_render.png");
+        let render_path_str = render_path.to_string_lossy().replace('\\', "/");
+        let py_render_path = python_string_literal(&render_path_str);
+        py.push_str(&format!(
+            "scene = bpy.context.scene\nif scene.camera is None:\n    bpy.ops.object.camera_add(location=(8.0, -11.0, 7.0))\n    scene.camera = bpy.context.object\n    scene.camera.rotation_euler = (math.radians(63), 0.0, math.radians(30))\nscene.render.engine = 'CYCLES'\nscene.cycles.device = 'CPU'\nscene.cycles.samples = 2\nscene.render.resolution_x = 480\nscene.render.resolution_y = 270\nscene.render.resolution_percentage = 70\nscene.render.image_settings.file_format = 'PNG'\nscene.render.filepath = {}\nbpy.ops.render.render(write_still=True)\nprint('◈ RevEngine preview rendered: ' + {})\n",
+            py_render_path, py_render_path
         ));
 
         py
@@ -145,5 +160,54 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
         } else {
             Err(format!("Blender finalizou com erro (código: {status})"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::{Entity, Scene};
+
+    #[test]
+    fn generated_python_escapes_entity_names() {
+        let mut scene = Scene::new_empty("QA");
+        scene.add_entity(Entity::new_cube(
+            1,
+            "Hero\"; import os",
+            [0.0, 1.0, 0.0],
+            1.0,
+            [0.2, 0.4, 0.8, 1.0],
+        ));
+
+        let script = BlenderBridge::generate_blender_scene_script(
+            &scene,
+            Path::new("C:/QA/Assets/Generated/scene.glb"),
+        );
+
+        assert!(script.contains(r#"obj.name = "Hero\";_import_os""#));
+        assert!(script.contains(r#"create_mat("mat_Hero\";_import_os""#));
+    }
+
+    #[test]
+    fn blender_background_export_smoke_when_configured() {
+        let Ok(blender_exe) = std::env::var("REVENGINE_QA_BLENDER_EXE") else {
+            return;
+        };
+        if !Path::new(&blender_exe).is_file() {
+            return;
+        }
+
+        let project_dir =
+            std::env::temp_dir().join(format!("revengine_blender_smoke_{}", std::process::id()));
+        let output =
+            BlenderBridge::sync_scene_to_blender(&Scene::default(), &blender_exe, &project_dir)
+                .expect("Blender deve exportar a cena de teste para GLB");
+        let output_path = Path::new(&output);
+        assert!(output_path.is_file());
+        assert!(fs::metadata(output_path).unwrap().len() > 0);
+        let preview_path = output_path.with_file_name("blender_scene_render.png");
+        assert!(preview_path.is_file());
+        assert!(fs::metadata(preview_path).unwrap().len() > 0);
+        let _ = fs::remove_dir_all(project_dir);
     }
 }

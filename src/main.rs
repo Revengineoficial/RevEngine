@@ -324,6 +324,7 @@ pub struct RevEngineApp {
     pub is_simulating: bool,
     pub simulation_start: Option<Instant>,
     pub simulation_time_sec: f32,
+    pub runtime_child: Option<std::process::Child>,
 }
 
 impl Default for RevEngineApp {
@@ -433,6 +434,7 @@ impl Default for RevEngineApp {
             is_simulating: false,
             simulation_start: None,
             simulation_time_sec: 0.0,
+            runtime_child: None,
         };
 
         app.log(
@@ -590,17 +592,30 @@ impl RevEngineApp {
                     self.project_path = parent.clone();
                     self.selected = 0;
 
+                    let mut scene_warning = None;
                     if let Some(root) = &parent {
-                        let scene_file = root.join("Scenes").join("Main.scene.json");
+                        let scene_file = root
+                            .join("Scenes")
+                            .join(format!("{}.scene.json", self.project.startup_scene));
                         if scene_file.is_file() {
-                            let _ = self.active_scene.load_from_file(&scene_file);
+                            if let Err(error) = self.active_scene.load_from_file(&scene_file) {
+                                scene_warning =
+                                    Some(format!("a cena não pôde ser carregada: {error}"));
+                                self.sync_project_to_scene();
+                            }
                         } else {
                             self.sync_project_to_scene();
                         }
                     }
-                    let msg = format!("Projeto aberto: {}", file.display());
+                    let (level, msg) = match scene_warning {
+                        Some(warning) => (
+                            "AVISO",
+                            format!("Projeto aberto, mas {warning}: {}", file.display()),
+                        ),
+                        None => ("INFO", format!("Projeto aberto: {}", file.display())),
+                    };
                     self.status = msg.clone();
-                    self.log("INFO", &msg);
+                    self.log(level, &msg);
                 }
                 None => {
                     self.status = "Não foi possível ler este projeto RevEngine.".into();
@@ -709,7 +724,8 @@ impl RevEngineApp {
             .current_dir(&runtime)
             .spawn()
         {
-            Ok(_) => {
+            Ok(child) => {
+                self.runtime_child = Some(child);
                 self.is_simulating = true;
                 self.simulation_start = Some(Instant::now());
                 let msg = "Runtime iniciado: compilando e executando o jogo com Bevy + Rapier 3D."
@@ -728,9 +744,47 @@ impl RevEngineApp {
     }
 
     pub fn stop_simulation(&mut self) {
+        if let Some(mut child) = self.runtime_child.take() {
+            #[cfg(windows)]
+            {
+                let pid = child.id().to_string();
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid, "/T", "/F"])
+                    .output();
+                let _ = child.kill();
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
         self.is_simulating = false;
         self.simulation_start = None;
-        self.log("INFO", "Simulação pausada / parada.");
+        self.log("INFO", "Runtime interrompido e processo encerrado.");
+    }
+
+    fn poll_runtime(&mut self) {
+        let finished = self
+            .runtime_child
+            .as_mut()
+            .and_then(|child| match child.try_wait() {
+                Ok(Some(status)) => {
+                    Some((status.success(), format!("Runtime finalizado ({status}).")))
+                }
+                Err(error) => Some((
+                    false,
+                    format!("Não foi possível consultar o runtime: {error}"),
+                )),
+                Ok(None) => None,
+            });
+        if let Some((success, message)) = finished {
+            self.runtime_child = None;
+            self.is_simulating = false;
+            self.simulation_start = None;
+            self.status = message.clone();
+            self.log(if success { "INFO" } else { "ERRO" }, &message);
+        }
     }
 
     pub fn add_object(&mut self, kind: &str) {
@@ -803,7 +857,7 @@ impl RevEngineApp {
         }
     }
 
-    pub fn run_blender(&mut self) {
+    pub fn run_blender(&mut self, ctx: &egui::Context) {
         let Some(root) = self.project_path.clone() else {
             self.status = "Salve o projeto antes de executar o bridge do Blender.".into();
             return;
@@ -823,7 +877,7 @@ impl RevEngineApp {
                 let msg = format!("Blender exportou com sucesso a cena GLB em '{}'!", glb);
                 self.status = msg.clone();
                 self.log("BLENDER", &msg);
-                self.refresh_blender_preview();
+                self.refresh_blender_preview(ctx);
             }
             Err(e) => {
                 let err = format!("Erro no Blender: {e}");
@@ -833,14 +887,16 @@ impl RevEngineApp {
         }
     }
 
-    pub fn refresh_blender_preview(&mut self) {
+    pub fn refresh_blender_preview(&mut self, ctx: &egui::Context) {
+        self.blender_preview = None;
+        self.selected_asset = None;
         let Some(root) = self.project_path.as_ref() else {
             return;
         };
         for name in [
-            "revengine_elf_portrait.png",
             "blender_scene_render.png",
             "generated_scene_render.png",
+            "revengine_elf_portrait.png",
         ] {
             let p = root.join("Assets").join("Generated").join(name);
             if p.is_file() {
@@ -848,11 +904,13 @@ impl RevEngineApp {
                     if let Ok(img) = image::load_from_memory(&bytes) {
                         let rgba = img.to_rgba8();
                         let size = [rgba.width() as usize, rgba.height() as usize];
-                        let _color_image = egui::ColorImage::from_rgba_unmultiplied(
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
                             size,
                             rgba.as_flat_samples().as_slice(),
                         );
-                        self.asset_search = name.to_string();
+                        self.blender_preview =
+                            Some(ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR));
+                        self.selected_asset = Some(p.clone());
                         break;
                     }
                 }
@@ -921,9 +979,11 @@ impl RevEngineApp {
         } else {
             Some(self.blender_path.clone())
         };
-        let bridge = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("blender")
-            .join("revengine_bridge.py");
+        let bridge = locate_blender_bridge().unwrap_or_else(|_| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("blender")
+                .join("revengine_bridge.py")
+        });
 
         std::thread::spawn(move || {
             let result: Result<AiCompletedResult, String> = (|| {
@@ -1067,7 +1127,7 @@ REGRAS FUNDAMENTAIS:
                                     &serde_json::json!({"actions": actions}),
                                 ) {
                                     let _ = fs::write(&plan, json_bytes);
-                                    if let Ok(mut child) = std::process::Command::new(exe)
+                                    match std::process::Command::new(exe)
                                         .args(["--background", "--python"])
                                         .arg(&bridge)
                                         .arg("--")
@@ -1076,20 +1136,36 @@ REGRAS FUNDAMENTAIS:
                                         .arg("--project")
                                         .arg(&root)
                                         .stdout(std::process::Stdio::piped())
-                                        .stderr(std::process::Stdio::piped())
+                                        .stderr(std::process::Stdio::null())
                                         .spawn()
                                     {
-                                        if let Some(stdout) = child.stdout.take() {
-                                            for line in std::io::BufReader::new(stdout)
-                                                .lines()
-                                                .map_while(Result::ok)
-                                            {
-                                                let _ =
-                                                    progress_tx.send(format!("Blender › {line}"));
+                                        Ok(mut child) => {
+                                            if let Some(stdout) = child.stdout.take() {
+                                                for line in std::io::BufReader::new(stdout)
+                                                    .lines()
+                                                    .map_while(Result::ok)
+                                                {
+                                                    let _ = progress_tx
+                                                        .send(format!("Blender › {line}"));
+                                                }
+                                            }
+                                            match child.wait() {
+                                                Ok(status) if status.success() => {
+                                                    reload_scene = true;
+                                                }
+                                                Ok(status) => {
+                                                    let _ = progress_tx.send(format!("Blender › Processo terminou com erro: {status}"));
+                                                }
+                                                Err(error) => {
+                                                    let _ = progress_tx.send(format!("Blender › Falha ao aguardar processo: {error}"));
+                                                }
                                             }
                                         }
-                                        let _ = child.wait();
-                                        reload_scene = true;
+                                        Err(error) => {
+                                            let _ = progress_tx.send(format!(
+                                                "Blender › Não foi possível iniciar: {error}"
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -1171,6 +1247,27 @@ REGRAS FUNDAMENTAIS:
     }
 }
 
+fn locate_blender_bridge() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            for ancestor in directory.ancestors().take(4) {
+                candidates.push(ancestor.join("blender").join("revengine_bridge.py"));
+            }
+        }
+    }
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("blender")
+            .join("revengine_bridge.py"),
+    );
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| "Script ponte do Blender não encontrado. Inclua a pasta 'blender' ao lado do executável.".into())
+}
+
 fn chrono_or_simple_time() -> String {
     // Portable timestamp generator without heavy chrono dependencies
     let dur = std::time::SystemTime::now()
@@ -1185,6 +1282,7 @@ fn chrono_or_simple_time() -> String {
 
 impl eframe::App for RevEngineApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_runtime();
         // High-End Studio Color Palette
         let panel_bg = egui::Color32::from_rgb(18, 22, 31);
         let bar_bg = egui::Color32::from_rgb(13, 16, 23);
@@ -1207,7 +1305,7 @@ impl eframe::App for RevEngineApp {
             .and_then(|rx| rx.try_recv().ok())
         {
             if let Some((_, last_msg)) = self.chat_history.last_mut() {
-                last_msg.push_str("\n");
+                last_msg.push('\n');
                 last_msg.push_str(&prog);
             }
             self.log("REVAI", &prog);
@@ -1253,7 +1351,7 @@ impl eframe::App for RevEngineApp {
                                 self.active_scene.entities.len()
                             ),
                         );
-                        self.refresh_blender_preview();
+                        self.refresh_blender_preview(ctx);
                     } else if ai_res.reload_scene {
                         if let Some(root) = &self.project_path {
                             let scene_path = root.join("Scenes").join("Main.scene.json");
@@ -1269,7 +1367,7 @@ impl eframe::App for RevEngineApp {
                                 }
                             }
                         }
-                        self.refresh_blender_preview();
+                        self.refresh_blender_preview(ctx);
                     }
 
                     self.chat_history.push(("RevAI".into(), full_text));
@@ -1378,7 +1476,7 @@ impl eframe::App for RevEngineApp {
                         self.show_doctor = true;
                     }
                     if ui.button("Blender ▶").clicked() {
-                        self.run_blender();
+                        self.run_blender(ctx);
                     }
                     if ui.button("⚙ Configurações").clicked() {
                         self.show_settings = true;
@@ -1512,6 +1610,11 @@ impl eframe::App for RevEngineApp {
                                             for entry in entries.flatten() {
                                                 let p = entry.path();
                                                 let name = entry.file_name().to_string_lossy().to_string();
+                                                if !self.asset_search.trim().is_empty()
+                                                    && !name.to_lowercase().contains(&self.asset_search.trim().to_lowercase())
+                                                {
+                                                    continue;
+                                                }
                                                 let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                                                 let is_dir = p.is_dir();
 
@@ -1542,8 +1645,17 @@ impl eframe::App for RevEngineApp {
                             }
 
                             if let Some((p, root)) = asset_to_insert {
-                                let _ = UniversalConverter::convert_file(&p, &mut self.active_scene, &root);
-                                self.sync_scene_to_project();
+                                match UniversalConverter::convert_file(&p, &mut self.active_scene, &root) {
+                                    Ok(message) => {
+                                        self.sync_scene_to_project();
+                                        self.status = message.clone();
+                                        self.log("INFO", &message);
+                                    }
+                                    Err(error) => {
+                                        self.status = format!("Falha ao inserir asset: {error}");
+                                        self.log("ERRO", &self.status.clone());
+                                    }
+                                }
                             }
                         }
 
@@ -1890,7 +2002,7 @@ impl eframe::App for RevEngineApp {
                     match self.settings_tab.as_str() {
                         "Chaves de IA" => {
                             ui.heading("CONFIGURAÇÃO DE CHAVES DE API DE INTELIGÊNCIA ARTIFICIAL");
-                            ui.label("Configure as chaves e modelos de cada provedor. As chaves serão salvas de forma segura no seu perfil local.");
+                            ui.label("Configure as chaves e modelos de cada provedor. As chaves ficam no arquivo local de configurações do seu perfil do Windows; proteja sua conta e não compartilhe esse arquivo.");
                             ui.separator();
 
                             egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
@@ -2013,10 +2125,17 @@ impl eframe::App for RevEngineApp {
                             self.provider_keys = self.settings.provider_keys.clone();
                             self.blender_path = self.settings.blender_exe.clone();
                             self.update_active_provider_key();
-                            let _ = save_settings(&self.settings);
-                            self.show_settings = false;
-                            self.status = "Configurações e chaves salvas com sucesso!".into();
-                            self.log("INFO", "Configurações e chaves de API salvas com sucesso.");
+                            match save_settings(&self.settings) {
+                                Ok(()) => {
+                                    self.show_settings = false;
+                                    self.status = "Configurações salvas com sucesso.".into();
+                                    self.log("INFO", "Configurações e chaves de API salvas no perfil local.");
+                                }
+                                Err(error) => {
+                                    self.status = format!("Falha ao salvar configurações: {error}");
+                                    self.log("ERRO", &self.status.clone());
+                                }
+                            }
                         }
                         if ui.button("Fechar").clicked() {
                             self.show_settings = false;
@@ -2170,7 +2289,7 @@ impl eframe::App for RevEngineApp {
                             ui.horizontal(|ui| {
                                 ui.heading("Blender 3D Suite");
                                 if ui.button("Sincronizar Cena com Blender").clicked() {
-                                    self.run_blender();
+                                    self.run_blender(ctx);
                                 }
                             });
                             ui.label("Sincroniza todas as geometrias e materiais da cena viva com o Blender e exporta GLB otimizado.");
@@ -2498,13 +2617,7 @@ mod tests {
     #[test]
     fn branding_and_blender_bridge_are_packaged() {
         assert!(!include_bytes!("../assets/branding/revengine-icon.png").is_empty());
-        assert!(
-            Path::new(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/blender/revengine_bridge.py"
-            ))
-            .exists()
-        );
+        assert!(locate_blender_bridge().unwrap().is_file());
     }
 
     #[test]
