@@ -153,8 +153,17 @@ def run_plan(plan_path, project):
     plan=json.loads(Path(plan_path).read_text(encoding="utf-8-sig"))
     out=Path(project)/"Assets"/"Generated"; out.mkdir(parents=True,exist_ok=True)
     done=[]
-    for a in plan.get("actions",[]):
-        kind=a.get("type","")
+    actions=plan.get("actions",[])
+    if not isinstance(actions,list) or not actions:
+        raise ValueError("O plano Blender não contém operações válidas.")
+    for index,a in enumerate(actions):
+        if not isinstance(a,dict):
+            raise TypeError("Operação Blender %d não é um objeto JSON." % index)
+        # RevAI historically emitted `action`; examples and older plans use `type`.
+        # Accept both so the model contract and the executor cannot silently diverge.
+        kind=str(a.get("type") or a.get("action") or "").strip().lower()
+        if not kind:
+            raise ValueError("Operação Blender %d sem campo 'type'/'action'." % index)
         if kind=="create_elf":
             done.extend(create_elf(out))
         elif kind=="new_scene":
@@ -388,6 +397,8 @@ def run_plan(plan_path, project):
             elif fmt=="FBX": bpy.ops.export_scene.fbx(filepath=str(path))
             elif fmt=="OBJ": bpy.ops.wm.obj_export(filepath=str(path))
             done.append(str(path))
+        else:
+            raise ValueError("Operação Blender não reconhecida: %r (índice %d)." % (kind,index))
         print("REVENGINE_STEP=" + str(kind) + "; total_assets=" + str(len(done)), flush=True)
     # Every AI generation leaves an editable native Blender source file.
     blend_path=out/"generated_scene.blend"

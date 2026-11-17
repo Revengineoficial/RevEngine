@@ -1016,17 +1016,17 @@ Responda com UM objeto JSON puro, sem markdown adicional:
     }
   ],
   "blender_actions": [
-    {"action":"new_scene"},
-    {"action":"add_mesh","shape":"cube","name":"Base","location":[0,0,1],"size":1.8},
-    {"action":"add_material","object":"Base","name":"HeroMat","color":[0.2,0.5,0.9],"metallic":0.3,"roughness":0.2},
-    {"action":"add_light","light_type":"SUN","location":[5,5,8],"power":1200},
-    {"action":"export","format":"GLB","filepath":"Assets/Generated/generated_scene.glb"}
+    {"type":"new_scene"},
+    {"type":"add_mesh","shape":"cube","name":"Base","location":[0,0,1],"size":1.8},
+    {"type":"add_material","object":"Base","name":"HeroMat","color":[0.2,0.5,0.9],"metallic":0.3,"roughness":0.2},
+    {"type":"add_light","light_type":"SUN","location":[5,5,8],"power":1200},
+    {"type":"export","format":"GLB"}
   ]
 }
 REGRAS FUNDAMENTAIS:
 1. NUNCA gere arquivos vazios. Crie Scenes/Main.scene.json para TODA solicitação de jogo ou modificação de cenário.
 2. Compatível com Bevy 0.16 + Rapier 3D no Runtime/ e compatível com Unity, Godot e Unreal nativamente.
-3. Se solicitado modelagem 3D detalhada, use blender_actions para criar os objetos e exportar em GLB.
+3. Se solicitado personagem, criatura ou objeto 3D, SEMPRE use blender_actions; nunca responda apenas com descrição ou cubos. Construa anatomia/proporções, silhueta, cabeça/face, mãos com dedos, pés, roupa em camadas, cabelo/pelos, acessórios, UVs, materiais PBR, iluminação, câmera, rig/armature e pose quando aplicável. Prefira malhas contínuas e topologia limpa; use peças separadas apenas onde a anatomia/roupa exigir. Gere detalhe de alta frequência sem destruir a silhueta; inclua bevels, subdivisão, weighted normals e displacement/bump quando fizer sentido. Salve .blend, exporte GLB e renderize uma imagem de inspeção. Não alegue fotorrealismo sem inspeção visual do render.
 4. Para mapas completos e ambientes, use generate_environment com resolution entre 192 e 512, biome (forest/desert/snow/canyon), scatter, seed e tamanho; combine com rochas, vegetação, água, iluminação e câmera.
 5. Para animações, use create_animation_preset com preset idle/walk/run/jump/attack e target armature ou personagem; se o usuário fornecer um rig, anime os ossos existentes.
 6. Para modelos importados, preserve materiais e animações, gere UVs somente quando ausentes, configure colisão estática para cenário e salve a fonte .blend editável.
@@ -1043,7 +1043,7 @@ REGRAS FUNDAMENTAIS:
                 let body = if provider == "Claude" {
                     serde_json::json!({
                         "model": model,
-                        "max_tokens": 4096,
+                        "max_tokens": 12288,
                         "system": system,
                         "messages": [{"role": "user", "content": prompt}]
                     })
@@ -1139,6 +1139,10 @@ REGRAS FUNDAMENTAIS:
                                 let control = root.join(".revengine");
                                 let _ = fs::create_dir_all(&control);
                                 let plan = control.join("blender_plan.json");
+                                let generated_dir = root.join("Assets").join("Generated");
+                                let _ =
+                                    fs::remove_file(generated_dir.join("generated_scene.blend"));
+                                let _ = fs::remove_file(generated_dir.join("generated_scene.glb"));
                                 if let Ok(json_bytes) = serde_json::to_vec_pretty(
                                     &serde_json::json!({"actions": actions}),
                                 ) {
@@ -1152,7 +1156,7 @@ REGRAS FUNDAMENTAIS:
                                         .arg("--project")
                                         .arg(&root)
                                         .stdout(std::process::Stdio::piped())
-                                        .stderr(std::process::Stdio::null())
+                                        .stderr(std::process::Stdio::inherit())
                                         .spawn()
                                     {
                                         Ok(mut child) => {
@@ -1167,7 +1171,22 @@ REGRAS FUNDAMENTAIS:
                                             }
                                             match child.wait() {
                                                 Ok(status) if status.success() => {
-                                                    reload_scene = true;
+                                                    let blend =
+                                                        generated_dir.join("generated_scene.blend");
+                                                    let glb =
+                                                        generated_dir.join("generated_scene.glb");
+                                                    let blend_ok = fs::metadata(&blend)
+                                                        .map(|m| m.len() > 0)
+                                                        .unwrap_or(false);
+                                                    let glb_ok = fs::metadata(&glb)
+                                                        .map(|m| m.len() > 0)
+                                                        .unwrap_or(false);
+                                                    if blend_ok && glb_ok {
+                                                        reload_scene = true;
+                                                        let _ = progress_tx.send(format!("Blender › Geração validada: .blend ({} bytes), GLB ({} bytes).", fs::metadata(&blend).map(|m| m.len()).unwrap_or(0), fs::metadata(&glb).map(|m| m.len()).unwrap_or(0)));
+                                                    } else {
+                                                        let _ = progress_tx.send("Blender › Processo terminou sem produzir os dois artefatos obrigatórios (.blend e .glb). Geração NÃO validada.".into());
+                                                    }
                                                 }
                                                 Ok(status) => {
                                                     let _ = progress_tx.send(format!("Blender › Processo terminou com erro: {status}"));
@@ -1184,6 +1203,8 @@ REGRAS FUNDAMENTAIS:
                                         }
                                     }
                                 }
+                            } else {
+                                let _ = progress_tx.send("RevAI › O plano contém modelagem Blender, mas nenhum executável Blender está configurado. Nenhum modelo 3D foi criado.".into());
                             }
                         }
                     }
