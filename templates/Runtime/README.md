@@ -1,4 +1,10 @@
-# RevEngine Runtime
-Runtime separado baseado em Bevy: renderização 3D PBR em tempo real, câmeras, iluminação, sombras, carregamento glTF/GLB e física 3D com Rapier.
-Execute nesta pasta com `cargo run --release`. O primeiro build baixa dependências e pode demorar.
-A cena inicial é carregada de `../Scenes/Main.scene.json`. Os modelos usam caminhos relativos à pasta do projeto.
+# RevEngine Runtime (Bevy + Rapier)
+
+## Controles 3D
+- **W/A/S/D**: movimentar para frente/esquerda/trás/direita.
+- **Botão direito do mouse + movimento**: olhar ao redor.
+- **Espaço / Ctrl esquerdo**: subir / descer no modo de voo de prototipagem.
+- **E**: procurar e registrar no console o objeto nomeado mais próximo (até 3 m).
+- **Esc**: sair do jogo.
+
+O controlador atual é um controlador de câmera em primeira pessoa para prototipagem, não um personagem físico completo. Colisões de jogador, gravidade, animação esquelética e sistema de interação configurável ainda precisam ser implementados.

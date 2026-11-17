@@ -1,3 +1,4 @@
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::{gltf::GltfAssetLabel, prelude::*};
 use bevy_rapier3d::prelude::*;
 use serde::Deserialize;
@@ -64,7 +65,7 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "RevEngine Game".into(),
-                        resolution: (1280.0, 720.0).into(),
+                        resolution: (1280.0_f32, 720.0_f32).into(),
                         ..default()
                     }),
                     ..default()
@@ -77,7 +78,15 @@ fn main() {
             ..default()
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, (rotate_demo, exit_on_escape))
+        .add_systems(
+            Update,
+            (
+                rotate_demo,
+                player_controller,
+                interact_nearby,
+                exit_on_escape,
+            ),
+        )
         .run();
 }
 fn setup(
@@ -89,7 +98,7 @@ fn setup(
 ) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(8.0, 7.0, 11.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 2.0, 8.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight {
@@ -204,6 +213,77 @@ fn rotate_demo(time: Res<Time>, mut q: Query<&mut Transform, With<Rotates>>) {
         t.rotate_y(time.delta_secs() * 0.55);
     }
 }
+// First-person 3D controller: WASD to walk, Space/Ctrl to fly vertically,
+// hold right mouse button to look around, E to inspect/interact with nearby props.
+fn player_controller(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mouse_motion: Res<AccumulatedMouseMotion>,
+    mut camera: Query<&mut Transform, With<Camera3d>>,
+) {
+    let Ok(mut transform) = camera.single_mut() else {
+        return;
+    };
+    let dt = time.delta_secs().min(0.05);
+    if mouse_buttons.pressed(MouseButton::Right) {
+        let delta = mouse_motion.delta;
+        transform.rotate_y(-delta.x * 0.0025);
+        transform.rotate_local_x(-delta.y * 0.0025);
+    }
+    let mut direction = Vec3::ZERO;
+    let forward = (transform.rotation * Vec3::NEG_Z).normalize_or_zero();
+    let right = (transform.rotation * Vec3::X).normalize_or_zero();
+    let forward_flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    let right_flat = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+    if keys.pressed(KeyCode::KeyW) {
+        direction += forward_flat;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        direction -= forward_flat;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        direction += right_flat;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        direction -= right_flat;
+    }
+    if keys.pressed(KeyCode::Space) {
+        direction.y += 1.0;
+    }
+    if keys.pressed(KeyCode::ControlLeft) {
+        direction.y -= 1.0;
+    }
+    if direction.length_squared() > 0.0 {
+        transform.translation += direction.normalize() * 5.0 * dt;
+    }
+}
+
+fn interact_nearby(
+    keys: Res<ButtonInput<KeyCode>>,
+    camera: Query<&Transform, With<Camera3d>>,
+    targets: Query<(&Transform, &Name)>,
+) {
+    if !keys.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let nearest = targets
+        .iter()
+        .filter_map(|(transform, name)| {
+            let distance = transform.translation.distance(camera.translation);
+            (distance <= 3.0).then_some((distance, name.as_str()))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    if let Some((distance, name)) = nearest {
+        println!("[INTERAÇÃO] {} (distância {:.1}m)", name, distance);
+    } else {
+        println!("[INTERAÇÃO] Nenhum objeto nomeado a até 3 metros.");
+    }
+}
+
 fn exit_on_escape(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<AppExit>) {
     if keys.just_pressed(KeyCode::Escape) {
         app_exit.write(AppExit::Success);

@@ -400,6 +400,18 @@ def run_plan(plan_path, project):
         else:
             raise ValueError("Operação Blender não reconhecida: %r (índice %d)." % (kind,index))
         print("REVENGINE_STEP=" + str(kind) + "; total_assets=" + str(len(done)), flush=True)
+    # Every AI generation receives a real inspection render, even when the model forgot
+    # to request an explicit `render` action. Keep it separate from the editable viewport.
+    render_path=out/"generated_scene_render.png"
+    if not render_path.exists():
+        setup_scene(out,"generated_scene")
+        scene=bpy.context.scene
+        scene.render.resolution_x=1280; scene.render.resolution_y=900
+        scene.render.resolution_percentage=100
+        scene.cycles.samples=24
+        scene.render.filepath=str(render_path)
+        bpy.ops.render.render(write_still=True)
+        done.append("generated_scene_render.png")
     # Every AI generation leaves an editable native Blender source file.
     blend_path=out/"generated_scene.blend"
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))

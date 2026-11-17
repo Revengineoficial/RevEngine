@@ -77,6 +77,7 @@ pub struct ViewportRenderer {
     pub snap_grid: f32, // 0.0 = off, 0.5, 1.0, 2.0
     pub camera_speed: f32,
     pub selected_id: Option<u64>,
+    pub show_render_preview: bool,
 }
 
 impl Default for ViewportRenderer {
@@ -92,6 +93,7 @@ impl Default for ViewportRenderer {
             snap_grid: 0.0,
             camera_speed: 1.0,
             selected_id: None,
+            show_render_preview: false,
         }
     }
 }
@@ -166,18 +168,38 @@ impl ViewportRenderer {
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
         let painter = ui.painter_at(rect);
 
+        // AI render preview is a dedicated viewport mode, never a translucent backdrop
+        // hidden beneath the editor grid and placeholder geometry.
+        if self.show_render_preview {
+            if let Some(texture) = blender_preview {
+                painter.image(
+                    texture.id(),
+                    rect,
+                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+                let pill = Rect::from_min_size(
+                    rect.left_top() + Vec2::splat(12.0),
+                    Vec2::new(300.0, 34.0),
+                );
+                painter.rect_filled(pill, 8.0, Color32::from_black_alpha(190));
+                painter.text(
+                    pill.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "RENDER DA REVAI  •  DUPLO CLIQUE PARA EDITAR",
+                    egui::FontId::proportional(11.0),
+                    Color32::WHITE,
+                );
+                if response.double_clicked() {
+                    self.show_render_preview = false;
+                }
+                return;
+            }
+            self.show_render_preview = false;
+        }
+
         // 1. Draw Sleek Atmospheric Viewport Skybox
         self.draw_atmospheric_background(&painter, rect);
-
-        // Optional Blender render backdrop if available
-        if let Some(texture) = blender_preview {
-            painter.image(
-                texture.id(),
-                rect,
-                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::from_white_alpha(110),
-            );
-        }
 
         // 2. Mouse Orbit / Pan / Zoom interactions
         if response.dragged_by(egui::PointerButton::Secondary) {

@@ -456,6 +456,108 @@ impl Default for RevEngineApp {
     }
 }
 
+fn studio_icon_button(
+    ui: &mut egui::Ui,
+    icon: &str,
+    label: &str,
+    tint: egui::Color32,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(76.0, 30.0), egui::Sense::click());
+    let painter = ui.painter_at(rect);
+    let bg = if response.hovered() {
+        egui::Color32::from_rgb(43, 54, 72)
+    } else {
+        egui::Color32::from_rgb(29, 36, 49)
+    };
+    painter.rect_filled(rect, 6.0, bg);
+    painter.rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(24)),
+        egui::StrokeKind::Inside,
+    );
+    let c = if response.hovered() {
+        tint
+    } else {
+        tint.gamma_multiply(0.88)
+    };
+    let center = egui::pos2(rect.left() + 14.0, rect.center().y);
+    match icon {
+        "new" => {
+            painter.line_segment(
+                [center - egui::vec2(0.0, 6.0), center + egui::vec2(0.0, 6.0)],
+                egui::Stroke::new(2.0_f32, c),
+            );
+            painter.line_segment(
+                [center - egui::vec2(6.0, 0.0), center + egui::vec2(6.0, 0.0)],
+                egui::Stroke::new(2.0_f32, c),
+            );
+        }
+        "open" => {
+            let p = [
+                center + egui::vec2(-7.0, -3.0),
+                center + egui::vec2(-2.0, -3.0),
+                center + egui::vec2(0.0, -1.0),
+                center + egui::vec2(7.0, -1.0),
+                center + egui::vec2(6.0, 6.0),
+                center + egui::vec2(-7.0, 6.0),
+            ];
+            painter.add(egui::Shape::convex_polygon(
+                p.to_vec(),
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(1.8_f32, c),
+            ));
+        }
+        "save" => {
+            painter.rect_stroke(
+                egui::Rect::from_center_size(center, egui::vec2(13.0, 13.0)),
+                2.0,
+                egui::Stroke::new(1.8_f32, c),
+                egui::StrokeKind::Inside,
+            );
+            painter.rect_filled(
+                egui::Rect::from_center_size(center + egui::vec2(0.0, 3.5), egui::vec2(7.0, 4.0)),
+                1.0,
+                c,
+            );
+            painter.line_segment(
+                [
+                    center + egui::vec2(-3.0, -6.0),
+                    center + egui::vec2(3.0, -6.0),
+                ],
+                egui::Stroke::new(1.5_f32, c),
+            );
+        }
+        "play" => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    center + egui::vec2(-4.0, -7.0),
+                    center + egui::vec2(7.0, 0.0),
+                    center + egui::vec2(-4.0, 7.0),
+                ],
+                c,
+                egui::Stroke::NONE,
+            ));
+        }
+        "stop" => {
+            painter.rect_filled(
+                egui::Rect::from_center_size(center, egui::vec2(11.0, 11.0)),
+                2.0,
+                c,
+            );
+        }
+        _ => {}
+    }
+    painter.text(
+        egui::pos2(rect.left() + 27.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(11.5),
+        egui::Color32::from_gray(235),
+    );
+    response
+}
+
 impl RevEngineApp {
     pub fn log(&mut self, level: &str, msg: &str) {
         let now = chrono_or_simple_time();
@@ -921,6 +1023,7 @@ impl RevEngineApp {
                         );
                         self.blender_preview =
                             Some(ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR));
+                        self.viewport.show_render_preview = true;
                         self.selected_asset = Some(p.clone());
                         break;
                     }
@@ -1143,6 +1246,9 @@ REGRAS FUNDAMENTAIS:
                                 let _ =
                                     fs::remove_file(generated_dir.join("generated_scene.blend"));
                                 let _ = fs::remove_file(generated_dir.join("generated_scene.glb"));
+                                let _ = fs::remove_file(
+                                    generated_dir.join("generated_scene_render.png"),
+                                );
                                 if let Ok(json_bytes) = serde_json::to_vec_pretty(
                                     &serde_json::json!({"actions": actions}),
                                 ) {
@@ -1181,11 +1287,47 @@ REGRAS FUNDAMENTAIS:
                                                     let glb_ok = fs::metadata(&glb)
                                                         .map(|m| m.len() > 0)
                                                         .unwrap_or(false);
-                                                    if blend_ok && glb_ok {
-                                                        reload_scene = true;
-                                                        let _ = progress_tx.send(format!("Blender › Geração validada: .blend ({} bytes), GLB ({} bytes).", fs::metadata(&blend).map(|m| m.len()).unwrap_or(0), fs::metadata(&glb).map(|m| m.len()).unwrap_or(0)));
+                                                    let render = generated_dir
+                                                        .join("generated_scene_render.png");
+                                                    let render_ok = fs::metadata(&render)
+                                                        .map(|m| m.len() > 1024)
+                                                        .unwrap_or(false);
+                                                    if blend_ok && glb_ok && render_ok {
+                                                        // Inject the generated GLB into the actual project scene so it
+                                                        // appears in the runtime, not merely as an orphaned file.
+                                                        let scene_file = root
+                                                            .join("Scenes")
+                                                            .join("Main.scene.json");
+                                                        let mut scene_json = fs::read(&scene_file).ok()
+                                                            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                                                            .unwrap_or_else(|| serde_json::json!({"name":"Main","models":[],"objects":[]}));
+                                                        if !scene_json
+                                                            .get("models")
+                                                            .is_some_and(|v| v.is_array())
+                                                        {
+                                                            scene_json["models"] =
+                                                                serde_json::json!([]);
+                                                        }
+                                                        if let Some(models) =
+                                                            scene_json["models"].as_array_mut()
+                                                        {
+                                                            models.retain(|m| m.get("path").and_then(|p| p.as_str()) != Some("Assets/Generated/generated_scene.glb"));
+                                                            models.push(serde_json::json!({"path":"Assets/Generated/generated_scene.glb","position":[0.0,0.0,0.0],"scale":1.0}));
+                                                        }
+                                                        if let Ok(bytes) =
+                                                            serde_json::to_vec_pretty(&scene_json)
+                                                        {
+                                                            if fs::write(&scene_file, bytes).is_ok()
+                                                            {
+                                                                reload_scene = true;
+                                                                // Prefer reloading the merged on-disk scene, preserving both
+                                                                // AI-authored objects and the Blender-generated model reference.
+                                                                spawned_scene = None;
+                                                            }
+                                                        }
+                                                        let _ = progress_tx.send(format!("Blender › Geração validada: .blend ({} bytes), GLB ({} bytes), render ({} bytes). Modelo inserido na cena do jogo.", fs::metadata(&blend).map(|m| m.len()).unwrap_or(0), fs::metadata(&glb).map(|m| m.len()).unwrap_or(0), fs::metadata(&render).map(|m| m.len()).unwrap_or(0)));
                                                     } else {
-                                                        let _ = progress_tx.send("Blender › Processo terminou sem produzir os dois artefatos obrigatórios (.blend e .glb). Geração NÃO validada.".into());
+                                                        let _ = progress_tx.send("Blender › Geração incompleta: eram obrigatórios .blend, .glb e generated_scene_render.png. Nenhum resultado foi marcado como concluído.".into());
                                                     }
                                                 }
                                                 Ok(status) => {
@@ -1431,33 +1573,40 @@ impl eframe::App for RevEngineApp {
                     );
                     ui.separator();
 
-                    if ui.button("＋ Novo").clicked() {
+                    if studio_icon_button(ui, "new", "Novo", accent).clicked() {
                         self.show_new = true;
                     }
-                    if ui.button("📂 Abrir").clicked() {
+                    if studio_icon_button(ui, "open", "Abrir", accent).clicked() {
                         self.open();
                     }
-                    if ui.button("💾 Salvar").clicked() {
+                    if studio_icon_button(ui, "save", "Salvar", accent).clicked() {
                         self.save();
+                    }
+                    if self.blender_preview.is_some() {
+                        let label = if self.viewport.show_render_preview {
+                            "◇ Cena 3D"
+                        } else {
+                            "▧ Ver render"
+                        };
+                        if ui.button(label).clicked() {
+                            self.viewport.show_render_preview = !self.viewport.show_render_preview;
+                        }
                     }
                     ui.separator();
 
                     // --- SIMULATION CONTROLS ---
                     if !self.is_simulating {
-                        if ui
-                            .button(egui::RichText::new("▶ Play").color(success).strong())
-                            .clicked()
-                        {
+                        if studio_icon_button(ui, "play", "Play", success).clicked() {
                             self.run_game();
                         }
                     } else {
-                        if ui
-                            .button(
-                                egui::RichText::new("⏹ Stop")
-                                    .color(egui::Color32::from_rgb(240, 80, 80))
-                                    .strong(),
-                            )
-                            .clicked()
+                        if studio_icon_button(
+                            ui,
+                            "stop",
+                            "Stop",
+                            egui::Color32::from_rgb(240, 80, 80),
+                        )
+                        .clicked()
                         {
                             self.stop_simulation();
                         }
