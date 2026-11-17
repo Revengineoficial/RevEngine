@@ -1,0 +1,46 @@
+name: Build and publish pre-alpha release
+
+on:
+  push:
+    tags:
+      - 'v*-pre-alpha.*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run automated tests
+        run: cargo test --all-targets
+
+      - name: Build Windows release
+        run: cargo build --release
+
+      - name: Package Windows x64 build
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'RevEngine-prealpha'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item 'target/release/revengine.exe' (Join-Path $stage 'RevEngine.exe')
+          Copy-Item 'README.md','RELEASE_NOTES_PRE_ALPHA.md','Start RevEngine.bat' $stage
+          Copy-Item 'assets/branding' (Join-Path $stage 'branding') -Recurse
+          Copy-Item 'blender' (Join-Path $stage 'blender') -Recurse
+          Remove-Item (Join-Path $stage 'blender/__pycache__') -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item 'scripts/install_godot.ps1' $stage
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath 'RevEngine-0.2.0-pre-alpha.1-windows-x64.zip' -CompressionLevel Optimal
+
+      - name: Publish GitHub pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RevEngine 0.2.0 — Pre-alpha 1 (Windows x64)
+          body_path: RELEASE_NOTES_PRE_ALPHA.md
+          prerelease: true
+          files: RevEngine-0.2.0-pre-alpha.1-windows-x64.zip
