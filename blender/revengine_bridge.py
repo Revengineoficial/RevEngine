@@ -3,6 +3,8 @@ from pathlib import Path
 from mathutils import Vector
 
 def mat(name, color, metallic=0.0, roughness=0.45, subsurface=0.0):
+    m=bpy.data.materials.get(name)
+    if m is not None: return m
     m=bpy.data.materials.new(name); m.diffuse_color=(*color,1); m.use_nodes=True
     p=m.node_tree.nodes.get("Principled BSDF")
     p.inputs["Base Color"].default_value=(*color,1)
@@ -147,7 +149,8 @@ def create_elf(outdir):
     return ["revengine_elf.blend","revengine_elf_portrait.png","revengine_elf.glb"]
 
 def run_plan(plan_path, project):
-    plan=json.loads(Path(plan_path).read_text(encoding="utf-8"))
+    # PowerShell 5 writes UTF-8 with BOM; accept both BOM and BOM-less JSON plans.
+    plan=json.loads(Path(plan_path).read_text(encoding="utf-8-sig"))
     out=Path(project)/"Assets"/"Generated"; out.mkdir(parents=True,exist_ok=True)
     done=[]
     for a in plan.get("actions",[]):
@@ -158,13 +161,219 @@ def run_plan(plan_path, project):
             bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete(use_global=False); done.append("scene_cleared")
         elif kind=="add_mesh":
             shape=a.get("shape","cube"); loc=a.get("location",[0,0,0]); size=float(a.get("size",2))
-            ops={"cube":lambda:bpy.ops.mesh.primitive_cube_add(size=size,location=loc),"sphere":lambda:bpy.ops.mesh.primitive_uv_sphere_add(segments=48,ring_count=32,radius=size/2,location=loc),"cylinder":lambda:bpy.ops.mesh.primitive_cylinder_add(vertices=48,radius=size/2,depth=size,location=loc),"cone":lambda:bpy.ops.mesh.primitive_cone_add(vertices=48,radius1=size/2,radius2=0,depth=size,location=loc),"torus":lambda:bpy.ops.mesh.primitive_torus_add(location=loc),"monkey":lambda:bpy.ops.mesh.primitive_monkey_add(location=loc)}
-            ops.get(shape,ops["cube"])(); o=bpy.context.object; o.name=str(a.get("name","Generated_"+shape)); done.append(o.name)
+            detail=max(1,min(6,int(a.get("detail_level",3))))
+            ops={"cube":lambda:bpy.ops.mesh.primitive_cube_add(size=size,location=loc),"sphere":lambda:bpy.ops.mesh.primitive_uv_sphere_add(segments=64*detail,ring_count=32*detail,radius=size/2,location=loc),"cylinder":lambda:bpy.ops.mesh.primitive_cylinder_add(vertices=64*detail,radius=size/2,depth=size,location=loc),"cone":lambda:bpy.ops.mesh.primitive_cone_add(vertices=64*detail,radius1=size/2,radius2=0,depth=size,location=loc),"torus":lambda:bpy.ops.mesh.primitive_torus_add(major_segments=96*detail,minor_segments=24*detail,location=loc),"monkey":lambda:bpy.ops.mesh.primitive_monkey_add(location=loc)}
+            ops.get(shape,ops["cube"])(); o=bpy.context.object; o.name=str(a.get("name","Generated_"+shape))
+            if a.get("smooth",True):
+                for poly in o.data.polygons: poly.use_smooth=True
+            if shape in ("cube","monkey"):
+                sub=o.modifiers.new("Micro-surface subdivision","SUBSURF"); sub.levels=min(3,detail); sub.render_levels=min(4,detail)
+            bevel=o.modifiers.new("Precision edge bevel","BEVEL"); bevel.width=size*0.008; bevel.segments=3
+            o.modifiers.new("Weighted vertex normals","WEIGHTED_NORMAL")
+            if a.get("apply_uv",True) and o.type=="MESH":
+                bpy.context.view_layer.objects.active=o; o.select_set(True)
+                bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT"); bpy.ops.uv.smart_project(island_margin=0.015); bpy.ops.object.mode_set(mode="OBJECT")
+            done.append(o.name)
+        elif kind=="generate_terrain":
+            loc=a.get("location",[0,0,0]); size=float(a.get("size",80)); resolution=max(32,min(512,int(a.get("resolution",192))))
+            import mathutils
+            verts=[]; faces=[]
+            for y in range(resolution+1):
+                for x in range(resolution+1):
+                    u=x/resolution-0.5; v=y/resolution-0.5
+                    n=(math.sin(u*31+math.cos(v*17))*0.42+math.cos(v*43+u*9)*0.24+math.sin((u+v)*83)*0.08)
+                    verts.append((loc[0]+u*size,loc[1]+v*size,loc[2]+n*float(a.get("height",5))))
+            for y in range(resolution):
+                for x in range(resolution):
+                    i=y*(resolution+1)+x; faces.append((i,i+1,i+resolution+2,i+resolution+1))
+            mesh=bpy.data.meshes.new("High density terrain mesh"); mesh.from_pydata(verts,[],faces); mesh.update()
+            obj=bpy.data.objects.new(str(a.get("name","Procedural_Terrain")),mesh); bpy.context.collection.objects.link(obj)
+            for poly in mesh.polygons: poly.use_smooth=True
+            obj["revengine_vertices"]=len(verts); obj["revengine_faces"]=len(faces)
+            sub=obj.modifiers.new("Terrain smoothing","SUBSURF"); sub.levels=1
+            done.append(obj.name+" ("+str(len(verts))+" vertices)")
+        elif kind=="import_asset":
+            asset=Path(a.get("path",""))
+            if not asset.is_file(): raise FileNotFoundError(str(asset))
+            ext=asset.suffix.lower()
+            if ext==".glb" or ext==".gltf": bpy.ops.import_scene.gltf(filepath=str(asset))
+            elif ext==".fbx": bpy.ops.import_scene.fbx(filepath=str(asset),use_image_search=True)
+            elif ext==".obj": bpy.ops.wm.obj_import(filepath=str(asset))
+            else: raise ValueError("Formato de asset não suportado: "+ext)
+            imported=list(bpy.context.selected_objects)
+            for obj in imported:
+                if obj.type=="MESH":
+                    obj["revengine_imported"]=True
+                    obj["revengine_vertices"]=len(obj.data.vertices)
+                    obj["revengine_faces"]=len(obj.data.polygons)
+                    # Normalize the imported asset for a predictable editable Blender workflow.
+                    if len(obj.data.vertices) and not obj.data.uv_layers:
+                        bpy.ops.object.select_all(action="DESELECT")
+                        obj.select_set(True); bpy.context.view_layer.objects.active=obj
+                        bpy.ops.object.mode_set(mode="EDIT")
+                        bpy.ops.mesh.select_all(action="SELECT")
+                        bpy.ops.uv.smart_project(island_margin=0.012)
+                        bpy.ops.object.mode_set(mode="OBJECT")
+                    if not obj.data.materials:
+                        fallback=mat("RevEngine Auto PBR - "+obj.name,(0.72,0.74,0.78),0.0,0.58)
+                        obj.data.materials.append(fallback)
+                    for slot in obj.material_slots:
+                        if slot.material and slot.material.use_nodes:
+                            bsdf=slot.material.node_tree.nodes.get("Principled BSDF")
+                            if bsdf:
+                                if "Metallic" in bsdf.inputs: bsdf.inputs["Metallic"].default_value=max(0.0,min(1.0,bsdf.inputs["Metallic"].default_value))
+                                if "Roughness" in bsdf.inputs: bsdf.inputs["Roughness"].default_value=max(0.04,min(1.0,bsdf.inputs["Roughness"].default_value))
+            done.extend([o.name for o in imported])
         elif kind=="add_material":
             o=bpy.data.objects.get(a.get("object",""))
             if o:
                 m=mat(a.get("name","AI Material"),a.get("color",[0.2,0.4,0.8]),float(a.get("metallic",0)),float(a.get("roughness",0.4)))
                 o.data.materials.append(m); done.append("material:"+m.name)
+        elif kind=="add_pbr_material":
+            o=bpy.data.objects.get(a.get("object",""))
+            if o and o.type=="MESH":
+                m=mat(a.get("name","Auto PBR Material"),a.get("color",[0.8,0.8,0.8]),float(a.get("metallic",0)),float(a.get("roughness",0.6)))
+                nodes=m.node_tree.nodes; links=m.node_tree.links; bsdf=nodes.get("Principled BSDF")
+                for channel,path in a.get("textures",{}).items():
+                    image_path=Path(path)
+                    if not image_path.is_file(): continue
+                    image=bpy.data.images.load(str(image_path),check_existing=True)
+                    tex=nodes.new("ShaderNodeTexImage"); tex.image=image; tex.label=channel
+                    if channel.lower() in ("albedo","basecolor","diffuse","color"):
+                        links.new(tex.outputs["Color"],bsdf.inputs["Base Color"])
+                    elif channel.lower() in ("roughness","rough"):
+                        tex.image.colorspace_settings.name="Non-Color"; links.new(tex.outputs["Color"],bsdf.inputs["Roughness"])
+                    elif channel.lower() in ("metallic","metalness"):
+                        tex.image.colorspace_settings.name="Non-Color"; links.new(tex.outputs["Color"],bsdf.inputs["Metallic"])
+                    elif channel.lower() in ("normal","normal_gl","nor_gl"):
+                        tex.image.colorspace_settings.name="Non-Color"; normal=nodes.new("ShaderNodeNormalMap"); links.new(tex.outputs["Color"],normal.inputs["Color"]); links.new(normal.outputs["Normal"],bsdf.inputs["Normal"])
+                if len(o.data.materials): o.data.materials[0]=m
+                else: o.data.materials.append(m)
+                done.append("pbr_material:"+m.name)
+        elif kind=="create_animation_preset":
+            # Procedural animation presets work on a selected/imported armature or a fallback object.
+            target=bpy.data.objects.get(a.get("object",""))
+            if target is None: target=bpy.context.active_object
+            preset=str(a.get("preset","idle")).lower()
+            fps=max(12,min(120,int(a.get("fps",30))))
+            duration=max(1.0,min(12.0,float(a.get("duration",2.0))))
+            frames=max(2,int(fps*duration))
+            action_name=str(a.get("name", "RevEngine_"+preset.title()))
+            if target is None: raise ValueError("Selecione um personagem/objeto para gerar a animação.")
+            if target.type=="ARMATURE":
+                target.animation_data_create(); action=bpy.data.actions.new(action_name); target.animation_data.action=action
+                bones=list(target.pose.bones)
+                def bone_match(*terms):
+                    return next((b for b in bones if any(t in b.name.lower() for t in terms)),None)
+                spine=bone_match("spine","chest","torso"); head=bone_match("head","neck")
+                upper_arms=[b for b in bones if ("arm" in b.name.lower() or "shoulder" in b.name.lower())]
+                legs=[b for b in bones if any(t in b.name.lower() for t in ("thigh","leg","foot"))]
+                for frame in range(1,frames+1):
+                    phase=(frame-1)/max(1,frames-1)*math.tau
+                    bpy.context.scene.frame_set(frame)
+                    if preset in ("walk","run"):
+                        speed=2.0 if preset=="run" else 1.0
+                        for i,b in enumerate(legs):
+                            side=-1 if i%2==0 else 1
+                            b.rotation_euler.x=math.sin(phase*2)*0.48*speed*side
+                            b.keyframe_insert(data_path="rotation_euler",frame=frame)
+                        for i,b in enumerate(upper_arms):
+                            side=-1 if i%2==0 else 1
+                            b.rotation_euler.x=-math.sin(phase*2)*0.38*speed*side
+                            b.keyframe_insert(data_path="rotation_euler",frame=frame)
+                        if spine:
+                            spine.location.z=abs(math.sin(phase*2))*0.045*speed
+                            spine.keyframe_insert(data_path="location",frame=frame)
+                    elif preset in ("jump","attack"):
+                        pulse=max(0.0,math.sin(phase))
+                        for b in legs+upper_arms:
+                            b.rotation_euler.x=(0.7 if preset=="jump" else -0.9)*pulse
+                            b.keyframe_insert(data_path="rotation_euler",frame=frame)
+                    else:
+                        if spine:
+                            spine.location.z=math.sin(phase)*0.025
+                            spine.keyframe_insert(data_path="location",frame=frame)
+                        if head:
+                            head.rotation_euler.z=math.sin(phase*0.5)*0.035
+                            head.keyframe_insert(data_path="rotation_euler",frame=frame)
+                # Blender 5.x uses layered Actions; keyframe insertion already defaults to Bezier.
+            else:
+                target.animation_data_create(); action=bpy.data.actions.new(action_name); target.animation_data.action=action
+                for frame in range(1,frames+1):
+                    phase=(frame-1)/max(1,frames-1)*math.tau
+                    bpy.context.scene.frame_set(frame)
+                    if preset in ("walk","run"):
+                        target.location.z=abs(math.sin(phase*2))*(0.08 if preset=="run" else 0.035)
+                        target.rotation_euler.y=math.sin(phase)*0.08
+                    elif preset=="jump":
+                        target.location.z=max(0.0,math.sin(phase))*1.8
+                    elif preset=="attack":
+                        target.rotation_euler.x=math.sin(phase)*0.8
+                    else:
+                        target.location.z=math.sin(phase)*0.035
+                    target.keyframe_insert(data_path="location",frame=frame)
+                    target.keyframe_insert(data_path="rotation_euler",frame=frame)
+            bpy.context.scene.frame_start=1; bpy.context.scene.frame_end=frames
+            done.append("animation_preset:"+action_name+":"+preset)
+        elif kind=="generate_environment":
+            # High-density procedural map generator: multi-octave terrain, biome scatter, water and paths.
+            size=max(20.0,min(500.0,float(a.get("size",120))))
+            resolution=max(64,min(512,int(a.get("resolution",256))))
+            height=max(1.0,min(80.0,float(a.get("height",18))))
+            biome=str(a.get("biome","forest")).lower()
+            verts=[]; faces=[]
+            for y in range(resolution+1):
+                for x in range(resolution+1):
+                    u=x/resolution-0.5; v=y/resolution-0.5
+                    n=(math.sin(u*17+math.cos(v*13))*0.34+math.cos(v*31+u*11)*0.22+
+                       math.sin((u+v)*59)*0.12+math.cos((u-v)*103)*0.055+
+                       math.sin(u*211+v*173)*0.018)
+                    ridge=abs(math.sin(u*8+v*5))*0.18
+                    z=(n+ridge)*height
+                    if biome in ("desert","canyon"): z*=0.55
+                    verts.append((u*size,v*size,z))
+            for y in range(resolution):
+                for x in range(resolution):
+                    i=y*(resolution+1)+x
+                    faces.append((i,i+1,i+resolution+2,i+resolution+1))
+            mesh=bpy.data.meshes.new("RevEngine_HighDensity_Environment_Mesh")
+            mesh.from_pydata(verts,[],faces); mesh.update()
+            terrain=bpy.data.objects.new("RevEngine_Procedural_"+biome.title()+"_Terrain",mesh)
+            bpy.context.collection.objects.link(terrain)
+            terrain["revengine_vertices"]=len(verts); terrain["revengine_faces"]=len(faces)
+            terrain["revengine_biome"]=biome
+            for p in mesh.polygons: p.use_smooth=True
+            terrain.data.materials.append(mat("Terrain - "+biome,(0.12,0.24,0.12) if biome=="forest" else (0.48,0.34,0.19) if biome in ("desert","canyon") else (0.28,0.34,0.42),0.0,0.88))
+            terrain.modifiers.new("Terrain micro-normal smoothing","WEIGHTED_NORMAL")
+            # deterministic scatter of rocks/trees; preserve editable instances as mesh objects.
+            import random
+            rng=random.Random(int(a.get("seed",42)))
+            count=max(0,min(600,int(a.get("scatter",180))))
+            for i in range(count):
+                x=rng.uniform(-size*0.46,size*0.46); y=rng.uniform(-size*0.46,size*0.46)
+                if abs(x)<size*0.08 and abs(y)<size*0.08: continue
+                z=math.sin(x/size*17+math.cos(y/size*13))*height*0.25
+                if biome=="forest" and i%3:
+                    bpy.ops.mesh.primitive_cone_add(vertices=12,radius1=rng.uniform(0.7,1.8),radius2=0,depth=rng.uniform(3,8),location=(x,y,z+2))
+                    obj=bpy.context.object; obj.name="Pine_Tree_%03d"%i
+                    obj.data.materials.append(mat("Pine foliage",(0.035,0.19,0.075),0,0.8))
+                    bpy.ops.mesh.primitive_cylinder_add(vertices=10,radius=0.22,depth=1.8,location=(x,y,z+0.9))
+                    bpy.context.object.name="Pine_Trunk_%03d"%i
+                else:
+                    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2,radius=rng.uniform(0.5,2.0),location=(x,y,z+0.4))
+                    bpy.context.object.name="Environment_Rock_%03d"%i
+            done.append("environment:"+terrain.name+":"+str(len(verts))+" vertices")
+        elif kind=="create_animation":
+            o=bpy.data.objects.get(a.get("object",""))
+            if o:
+                action_name=str(a.get("name","RevEngine_Action"))
+                o.animation_data_create(); o.animation_data.action=bpy.data.actions.new(action_name)
+                for key in a.get("keyframes",[]):
+                    frame=int(key.get("frame",1)); bpy.context.scene.frame_set(frame)
+                    if "location" in key: o.location=key["location"]; o.keyframe_insert(data_path="location",frame=frame)
+                    if "rotation" in key: o.rotation_euler=key["rotation"]; o.keyframe_insert(data_path="rotation_euler",frame=frame)
+                    if "scale" in key: o.scale=key["scale"]; o.keyframe_insert(data_path="scale",frame=frame)
+                done.append("animation:"+action_name)
         elif kind=="add_camera":
             bpy.ops.object.camera_add(location=a.get("location",[7,-7,5])); bpy.context.scene.camera=bpy.context.object; done.append("camera")
         elif kind=="add_light":

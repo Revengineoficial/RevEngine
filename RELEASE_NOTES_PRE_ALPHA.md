@@ -9,7 +9,9 @@
 - Editor desktop em Rust/egui com viewport 3D, hierarquia, inspetor, console e navegador de assets.
 - Projetos `.rev`, cenas JSON e estrutura de projeto com runtime Bevy 0.16 + Rapier 3D.
 - RevAI com provedores configuráveis e geração assistida de arquivos/cenas.
-- Ponte Blender para reconstruir primitivas, exportar GLB e gerar prévia PNG usando renderização Cycles em CPU.
+- Ponte Blender com malhas densas, terrenos multi-octave até 512×512, biomas com dispersão de vegetação/rochas, materiais PBR, UV automático, presets de animação procedural (idle/walk/run/jump/attack), importação GLB/GLTF/FBX/OBJ, fonte .blend e exportação GLB.
+- Biblioteca Poly Haven para modelos, texturas PBR e HDRIs gratuitos CC0 declarados, com download organizado por projeto e aplicação automática do mapa de cor.
+- Link integrado para a Quaternius Universal Animation Library (120+ animações CC0); o download do pack é feito na página oficial e a importação no engine é local.
 - Exportadores/conversores experimentais para Godot, Unity, Unreal, Roblox, C++, C# e Lua.
 
 ## Correções incluídas nesta revisão
@@ -29,7 +31,8 @@
 - `cargo fmt --all` — aplicado.
 - `cargo check --all-targets` — aprovado.
 - `cargo test --all-targets` — 21 testes aprovados.
-- Blender 5.3.0 — teste headless de exportação GLB e render PNG aprovado.
+- Blender 5.3.0 — teste headless de terreno procedural (9.409 vértices), dispersão de árvores/rochas, preset de animação walk e exportação GLB + .blend aprovado.
+- Correção de compatibilidade Blender 5.x: ações não acessam mais `Action.fcurves` legado; planos JSON com BOM UTF-8 também são aceitos.
 - `cargo clippy --all-targets` — executado; ainda há avisos de estilo não bloqueantes.
 - `cargo build --release` — build Windows x64 otimizado concluído.
 

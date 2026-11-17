@@ -13,6 +13,7 @@ mod doctor;
 mod embedded_templates;
 mod integrations;
 mod optimizer;
+mod polyhaven;
 mod procedural_scenes;
 mod scene;
 mod viewport_3d;
@@ -296,6 +297,11 @@ pub struct RevEngineApp {
     pub asset_search: String,
     pub selected_asset: Option<PathBuf>,
     pub asset_preview: Option<(PathBuf, egui::TextureHandle)>,
+    pub marketplace_query: String,
+    pub marketplace_kind: String,
+    pub marketplace_results: Vec<polyhaven::FreeAsset>,
+    pub marketplace_status: String,
+    pub marketplace_open: bool,
 
     // Advanced Engine Components
     pub active_scene: Scene,
@@ -411,6 +417,11 @@ impl Default for RevEngineApp {
             asset_search: String::new(),
             selected_asset: None,
             asset_preview: None,
+            marketplace_query: String::new(),
+            marketplace_kind: "Modelos".into(),
+            marketplace_results: Vec::new(),
+            marketplace_status: "Catálogo gratuito Poly Haven (CC0). Pesquise para carregar resultados.".into(),
+            marketplace_open: false,
 
             active_scene,
             viewport: ViewportRenderer::default(),
@@ -1016,6 +1027,11 @@ REGRAS FUNDAMENTAIS:
 1. NUNCA gere arquivos vazios. Crie Scenes/Main.scene.json para TODA solicitação de jogo ou modificação de cenário.
 2. Compatível com Bevy 0.16 + Rapier 3D no Runtime/ e compatível com Unity, Godot e Unreal nativamente.
 3. Se solicitado modelagem 3D detalhada, use blender_actions para criar os objetos e exportar em GLB.
+4. Para mapas completos e ambientes, use generate_environment com resolution entre 192 e 512, biome (forest/desert/snow/canyon), scatter, seed e tamanho; combine com rochas, vegetação, água, iluminação e câmera.
+5. Para animações, use create_animation_preset com preset idle/walk/run/jump/attack e target armature ou personagem; se o usuário fornecer um rig, anime os ossos existentes.
+6. Para modelos importados, preserve materiais e animações, gere UVs somente quando ausentes, configure colisão estática para cenário e salve a fonte .blend editável.
+7. Prefira malhas detalhadas com geometria real, modifiers, bevels, weighted normals, curvas e instâncias; não substitua pedidos de alta qualidade por cubos simples.
+8. Toda cena Blender deve exportar GLB e salvar arquivo .blend nativo; renderize preview quando solicitado.
 "#;
 
                 let url = if provider == "Claude" {
@@ -1592,6 +1608,9 @@ impl eframe::App for RevEngineApp {
                                 ui.text_edit_singleline(&mut self.asset_search);
                                 if ui.button("Importar Novo Asset").clicked() {
                                     self.import_asset();
+                                }
+                                if ui.button("🌐 Biblioteca Gratuita 3D / PBR").clicked() {
+                                    self.marketplace_open = true;
                                 }
                                 if let Some(root) = &self.project_path {
                                     if ui.button("Abrir Pasta no Explorer").clicked() {
@@ -2303,6 +2322,161 @@ impl eframe::App for RevEngineApp {
                         self.show_integrations = false;
                     }
                 });
+        }
+
+        // Biblioteca de assets gratuitos com licença CC0 declarada.
+        if self.marketplace_open {
+            let mut selected_download: Option<polyhaven::FreeAsset> = None;
+            egui::Window::new("Biblioteca de Assets Gratuitos — Poly Haven")
+                .default_size([760.0, 560.0])
+                .resizable(true)
+                .show(ctx, |ui| {
+                    ui.label("Modelos, texturas e HDRIs gratuitos. O catálogo Poly Haven declara licença CC0; confira sempre a página do asset antes de redistribuir.");
+                    ui.horizontal(|ui| {
+                        ui.hyperlink_to("Animações humanoides CC0 — Quaternius (120+ clipes)", "https://quaternius.itch.io/universal-animation-library");
+                        ui.label("Baixe o pacote Standard gratuito e importe GLB/FBX pelo Content Browser.");
+                    });
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("marketplace_kind")
+                            .selected_text(&self.marketplace_kind)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.marketplace_kind, "Modelos".into(), "Modelos 3D");
+                                ui.selectable_value(&mut self.marketplace_kind, "Texturas".into(), "Texturas PBR");
+                                ui.selectable_value(&mut self.marketplace_kind, "HDRIs".into(), "HDRIs / iluminação");
+                            });
+                        ui.text_edit_singleline(&mut self.marketplace_query);
+                        if ui.button("Buscar no catálogo").clicked() {
+                            match polyhaven::search(&self.marketplace_query, &self.marketplace_kind) {
+                                Ok(items) => {
+                                    self.marketplace_status = format!("{} resultados carregados.", items.len());
+                                    self.marketplace_results = items;
+                                }
+                                Err(e) => self.marketplace_status = format!("Falha na busca: {e}"),
+                            }
+                        }
+                    });
+                    ui.label(&self.marketplace_status);
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(390.0).show(ui, |ui| {
+                        for item in &self.marketplace_results {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(egui::RichText::new(&item.name).strong());
+                                        ui.label(format!("{} • {} • {}", item.id, item.kind, item.license));
+                                        ui.hyperlink_to("Abrir página/licença", format!("https://polyhaven.com/a/{}", item.id));
+                                    });
+                                    if ui.button("Baixar e adicionar ao projeto").clicked() {
+                                        selected_download = Some(item.clone());
+                                    }
+                                });
+                            });
+                        }
+                    });
+                    ui.separator();
+                    if ui.button("Fechar biblioteca").clicked() { self.marketplace_open = false; }
+                });
+            if let Some(asset) = selected_download {
+                if let Some(root) = self.project_path.clone() {
+                    match polyhaven::download(&asset, &root) {
+                        Ok(paths) => {
+                            // Texturas baixadas são aplicadas automaticamente ao objeto selecionado
+                            // (ou ao último modelo da cena), permanecendo editáveis no Inspector.
+                            if asset.kind == "Texturas" {
+                                if let Some(texture) = paths
+                                    .iter()
+                                    .find(|p| {
+                                        let lower = p.to_lowercase();
+                                        lower.contains("diff")
+                                            || lower.contains("albedo")
+                                            || lower.contains("color")
+                                    })
+                                    .or_else(|| paths.first())
+                                {
+                                    if let Ok(relative) = Path::new(texture).strip_prefix(&root) {
+                                        let rel = relative.to_string_lossy().replace('\\', "/");
+                                        let target_id = self.viewport.selected_id;
+                                        let target_index = target_id
+                                            .and_then(|id| {
+                                                self.active_scene
+                                                    .entities
+                                                    .iter()
+                                                    .position(|e| e.id == id)
+                                            })
+                                            .or_else(|| {
+                                                self.active_scene
+                                                    .entities
+                                                    .iter()
+                                                    .rposition(|e| e.kind == "model")
+                                            });
+                                        let target_name = if let Some(index) = target_index {
+                                            let entity = &mut self.active_scene.entities[index];
+                                            entity.material.texture_path = Some(rel.clone());
+                                            Some(entity.name.clone())
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(name) = target_name {
+                                            self.log(
+                                                "INFO",
+                                                &format!(
+                                                    "Textura aplicada automaticamente em '{}': {}",
+                                                    name, rel
+                                                ),
+                                            );
+                                        } else {
+                                            self.log("AVISO", "Textura importada. Selecione um objeto para aplicá-la no Inspector.");
+                                        }
+                                    }
+                                }
+                            }
+                            for path in &paths {
+                                if path.to_lowercase().ends_with(".gltf")
+                                    || path.to_lowercase().ends_with(".glb")
+                                {
+                                    let p = PathBuf::from(path);
+                                    if let Ok(relative) = p.strip_prefix(&root) {
+                                        let rel = relative.to_string_lossy().replace('\\', "/");
+                                        let id = self.active_scene.alloc_id();
+                                        let mut entity = Entity::new_cube(
+                                            id,
+                                            &asset.name,
+                                            [0.0, 1.0, 0.0],
+                                            1.0,
+                                            [0.8, 0.8, 0.85, 1.0],
+                                        );
+                                        entity.kind = "model".into();
+                                        entity.model_path = Some(rel);
+                                        entity.physics.enabled = true;
+                                        entity.physics.body_type = "Static".into();
+                                        entity.physics.collider = "mesh".into();
+                                        entity.physics.mass = 1.0;
+                                        self.active_scene.add_entity(entity);
+                                        self.log("INFO", &format!("Asset '{}' adicionado à cena com materiais e arquivos auxiliares.", asset.name));
+                                    } else {
+                                        self.log(
+                                            "ERRO",
+                                            "O caminho baixado ficou fora da pasta do projeto.",
+                                        );
+                                    }
+                                    break;
+                                }
+                            }
+                            self.sync_scene_to_project();
+                            self.marketplace_status =
+                                format!("Download concluído: {}", paths.join(", "));
+                            self.status = self.marketplace_status.clone();
+                        }
+                        Err(e) => {
+                            self.marketplace_status = format!("Falha ao baixar asset: {e}");
+                            self.log("ERRO", &self.marketplace_status.clone());
+                        }
+                    }
+                } else {
+                    self.marketplace_status =
+                        "Salve/abra um projeto antes de baixar assets.".into();
+                }
+            }
         }
 
         // 9.4 Doctor & Dependências Window
