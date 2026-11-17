@@ -99,6 +99,18 @@ pub struct EngineSettings {
     pub custom_key: String,
     #[serde(default)]
     pub custom_model: String,
+    #[serde(default = "default_true_setting")]
+    pub show_grid: bool,
+    #[serde(default = "default_true_setting")]
+    pub show_orientation_gizmo: bool,
+    #[serde(default = "default_true_setting")]
+    pub show_ground_shadows: bool,
+    #[serde(default)]
+    pub wireframe_only: bool,
+}
+
+fn default_true_setting() -> bool {
+    true
 }
 
 impl Default for EngineSettings {
@@ -173,6 +185,10 @@ impl Default for EngineSettings {
             custom_endpoint: "http://localhost:1234/v1".into(),
             custom_key: String::new(),
             custom_model: "local-model".into(),
+            show_grid: true,
+            show_orientation_gizmo: true,
+            show_ground_shadows: true,
+            wireframe_only: false,
         }
     }
 }
@@ -359,6 +375,13 @@ impl Default for RevEngineApp {
             .get(&initial_provider)
             .cloned()
             .unwrap_or_else(|| "nvidia/nemotron-3.5-lightning-30b-a3b".into());
+        let viewport = ViewportRenderer {
+            show_grid: settings.show_grid,
+            show_orientation_gizmo: settings.show_orientation_gizmo,
+            show_ground_shadows: settings.show_ground_shadows,
+            wireframe_only: settings.wireframe_only,
+            ..Default::default()
+        };
 
         // Auto-initialize default project so files, assets, and scenes are live from start
         let default_proj_dir =
@@ -424,7 +447,7 @@ impl Default for RevEngineApp {
             marketplace_open: false,
 
             active_scene,
-            viewport: ViewportRenderer::default(),
+            viewport,
             dependency_statuses: DependencyDoctor::check_all(&blender_exe),
             doctor_busy: false,
             optimizer_report: None,
@@ -701,6 +724,7 @@ impl RevEngineApp {
             {
                 Some(p) => {
                     self.project = p;
+                    self.viewport.selected_id = None;
                     let parent = file.parent().map(Path::to_path_buf);
                     self.project_path = parent.clone();
                     self.selected = 0;
@@ -782,25 +806,45 @@ impl RevEngineApp {
                     self.project_path = Some(dir.clone());
                     self.selected = 0;
 
-                    if let Err(e) = embedded_templates::install_project_scaffolding(&dir) {
-                        self.status = format!("Aviso ao preparar templates do projeto: {e}");
+                    if let Err(error) = embedded_templates::install_project_scaffolding(&dir) {
+                        self.status = format!("Falha ao preparar os arquivos do projeto: {error}");
+                        self.log("ERRO", &self.status.clone());
+                        self.show_new = false;
+                        return;
                     }
 
                     self.active_scene = Scene::default();
+                    self.viewport.selected_id = None;
                     self.active_scene.name = self.project.startup_scene.clone();
-                    let _ = self
-                        .active_scene
-                        .save_to_file(&dir.join("Scenes").join("Main.scene.json"));
                     self.sync_scene_to_project();
 
-                    self.save();
-                    let msg = format!(
-                        "Projeto '{}' criado com sucesso em '{}'!",
-                        self.project.name,
-                        dir.display()
-                    );
-                    self.status = msg.clone();
-                    self.log("INFO", &msg);
+                    let save_result = (|| -> Result<(), String> {
+                        let project_json = serde_json::to_string_pretty(&self.project)
+                            .map_err(|error| format!("Falha ao serializar project.rev: {error}"))?;
+                        fs::write(dir.join("project.rev"), project_json)
+                            .map_err(|error| format!("Falha ao gravar project.rev: {error}"))?;
+                        self.active_scene
+                            .save_to_file(&dir.join("Scenes").join("Main.scene.json"))?;
+                        Ok(())
+                    })();
+
+                    match save_result {
+                        Ok(()) => {
+                            let msg = format!(
+                                "Projeto '{}' criado e arquivos principais gravados e verificados em '{}'!",
+                                self.project.name,
+                                dir.display()
+                            );
+                            self.status = msg.clone();
+                            self.log("INFO", &msg);
+                        }
+                        Err(error) => {
+                            self.status = format!(
+                                "Projeto criado, mas houve falha ao gravar seus arquivos: {error}"
+                            );
+                            self.log("ERRO", &self.status.clone());
+                        }
+                    }
                 }
                 Err(e) => {
                     self.status = format!("Falha ao criar diretório do projeto: {e}");
@@ -827,9 +871,22 @@ impl RevEngineApp {
             }
         }
 
-        let _ = self
+        if let Err(error) = self
             .active_scene
-            .save_to_file(&root.join("Scenes").join("Main.scene.json"));
+            .save_to_file(&root.join("Scenes").join("Main.scene.json"))
+        {
+            self.status =
+                format!("Não foi possível salvar a cena antes de iniciar o jogo: {error}");
+            self.log("ERRO", &self.status.clone());
+            return;
+        }
+
+        if self.runtime_child.is_some() {
+            self.status =
+                "O runtime já está em execução. Use Stop antes de iniciar outra instância.".into();
+            self.log("AVISO", &self.status.clone());
+            return;
+        }
 
         match std::process::Command::new("cargo")
             .args(["run", "--release", "--manifest-path"])
@@ -857,24 +914,45 @@ impl RevEngineApp {
     }
 
     pub fn stop_simulation(&mut self) {
-        if let Some(mut child) = self.runtime_child.take() {
-            #[cfg(windows)]
-            {
-                let pid = child.id().to_string();
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid, "/T", "/F"])
-                    .output();
-                let _ = child.kill();
-            }
-            #[cfg(not(windows))]
-            {
-                let _ = child.kill();
-            }
-            let _ = child.wait();
-        }
+        let Some(mut child) = self.runtime_child.take() else {
+            self.is_simulating = false;
+            self.simulation_start = None;
+            self.status = "Nenhum runtime estava em execução.".into();
+            self.log("AVISO", &self.status.clone());
+            return;
+        };
+
+        #[cfg(windows)]
+        let tree_killed = std::process::Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+
+        #[cfg(not(windows))]
+        let tree_killed = false;
+
+        let kill_result = if tree_killed { Ok(()) } else { child.kill() };
+        let wait_result = child.wait();
         self.is_simulating = false;
         self.simulation_start = None;
-        self.log("INFO", "Runtime interrompido e processo encerrado.");
+
+        match (kill_result, wait_result) {
+            (_, Ok(_)) => {
+                self.status = "Runtime interrompido e processo encerrado.".into();
+                self.log("INFO", &self.status.clone());
+            }
+            (Err(error), Err(wait_error)) => {
+                self.status = format!("Falha ao encerrar runtime: {error}; espera: {wait_error}");
+                self.log("ERRO", &self.status.clone());
+            }
+            (Ok(()), Err(wait_error)) => {
+                self.status = format!(
+                    "Sinal de encerramento enviado, mas não foi possível confirmar a saída do runtime: {wait_error}"
+                );
+                self.log("ERRO", &self.status.clone());
+            }
+        }
     }
 
     fn poll_runtime(&mut self) {
@@ -1784,7 +1862,16 @@ impl eframe::App for RevEngineApp {
                                 }
                                 if let Some(root) = &self.project_path {
                                     if ui.button("Abrir Pasta no Explorer").clicked() {
-                                        let _ = std::process::Command::new("explorer").arg(root.join("Assets")).spawn();
+                                        match std::process::Command::new("explorer").arg(root.join("Assets")).spawn() {
+                                            Ok(_) => {
+                                                self.status = "Pasta Assets aberta no Explorador de Arquivos.".into();
+                                                self.log("INFO", &self.status.clone());
+                                            }
+                                            Err(error) => {
+                                                self.status = format!("Não foi possível abrir a pasta Assets: {error}");
+                                                self.log("ERRO", &self.status.clone());
+                                            }
+                                        }
                                     }
                                 }
                             });
@@ -1851,13 +1938,26 @@ impl eframe::App for RevEngineApp {
                         "ScriptEditor" => {
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(format!("Editando: {}", self.script_editor_file)).strong());
+                                if ui.button("Abrir Script...").clicked() {
+                                    if let Some(file) = rfd::FileDialog::new().add_filter("Scripts", &["py", "rs", "lua", "luau", "js", "ts"]).pick_file() {
+                                        match fs::read_to_string(&file) {
+                                            Ok(content) => {
+                                                self.script_editor_content = content;
+                                                self.script_editor_file = self.project_path.as_ref().and_then(|root| file.strip_prefix(root).ok()).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|| file.to_string_lossy().to_string());
+                                                self.script_editor_status = format!("Aberto: {}", file.display());
+                                            }
+                                            Err(error) => {
+                                                self.script_editor_status = format!("Falha ao abrir script: {error}");
+                                                self.log("ERRO", &self.script_editor_status.clone());
+                                            }
+                                        }
+                                    }
+                                }
                                 if ui.button("💾 Salvar Script").clicked() {
                                     if let Some(root) = &self.project_path {
                                         let target = root.join(&self.script_editor_file);
-                                        if let Some(parent) = target.parent() {
-                                            let _ = fs::create_dir_all(parent);
-                                        }
-                                        match fs::write(&target, &self.script_editor_content) {
+                                        let parent_result = target.parent().map(fs::create_dir_all).transpose();
+                                        match parent_result.and_then(|_| fs::write(&target, &self.script_editor_content).map_err(std::io::Error::other)) {
                                             Ok(()) => {
                                                 self.script_editor_status = format!("Salvo em {}", target.display());
                                                 self.log("INFO", &format!("Script salvo: {}", self.script_editor_file));
@@ -2083,8 +2183,7 @@ impl eframe::App for RevEngineApp {
                             }
                         });
 
-                    let has_key = !self.provider_keys.get(&self.ai_provider).cloned().unwrap_or_default().is_empty()
-                        || !self.ai_key.trim().is_empty();
+                    let has_key = self.provider_keys.get(&self.ai_provider).is_some_and(|key| !key.trim().is_empty());
                     if has_key {
                         ui.label(egui::RichText::new("✔ Chave Ativa").color(success).small());
                     } else {
@@ -2118,9 +2217,10 @@ impl eframe::App for RevEngineApp {
 
                 // Prompt Input
                 ui.horizontal(|ui| {
-                    let text_edit = ui.text_edit_multiline(&mut self.chat_input);
-                    if ui.button("Enviar ➜").clicked()
-                        || (text_edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl))
+                    let text_edit = ui.add_enabled(!self.chat_busy, egui::TextEdit::multiline(&mut self.chat_input).desired_rows(2));
+                    let send_label = if self.chat_busy { "Processando…" } else { "Enviar ➜" };
+                    if ui.add_enabled(!self.chat_busy, egui::Button::new(send_label)).clicked()
+                        || (!self.chat_busy && text_edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl))
                     {
                         self.send_chat();
                     }
@@ -2128,23 +2228,23 @@ impl eframe::App for RevEngineApp {
 
                 // Quick Prompt Pills
                 ui.horizontal_wrapped(|ui| {
-                    if ui.small_button("🧱 Jogo Roblox (Lua/Blender)").clicked() {
+                    if ui.add_enabled(!self.chat_busy, egui::Button::new("🧱 Jogo Roblox (Lua/Blender)").small()).clicked() {
                         self.chat_input = "Crie um jogo completo de obby e aventura do Roblox, monte os modelos 3D no Blender e molde a lógica para Luau/Lua em pastas organizadas com arquivo .rbxlx.".into();
                         self.send_chat();
                     }
-                    if ui.small_button("🏰 Castelo").clicked() {
+                    if ui.add_enabled(!self.chat_busy, egui::Button::new("🏰 Castelo").small()).clicked() {
                         self.chat_input = "Crie uma cena medieval completa com muralhas, tochas, terreno e castelo em 3D.".into();
                         self.send_chat();
                     }
-                    if ui.small_button("🚀 Corrida Espacial").clicked() {
+                    if ui.add_enabled(!self.chat_busy, egui::Button::new("🚀 Corrida Espacial").small()).clicked() {
                         self.chat_input = "Crie um jogo de corrida espacial com asteroides, naves e iluminação cósmica.".into();
                         self.send_chat();
                     }
-                    if ui.small_button("🧝 Elfo Fantasia").clicked() {
+                    if ui.add_enabled(!self.chat_busy, egui::Button::new("🧝 Elfo Fantasia").small()).clicked() {
                         self.chat_input = "Gere um modelo 3D de elfo detalhado no Blender com render e exporte para GLB.".into();
                         self.send_chat();
                     }
-                    if ui.small_button("🗺️ Terreno Cave").clicked() {
+                    if ui.add_enabled(!self.chat_busy, egui::Button::new("🗺️ Terreno Cave").small()).clicked() {
                         self.chat_input = "Adicione um terreno procedural com componentes Python compatíveis com a Cave Engine.".into();
                         self.send_chat();
                     }
@@ -2255,8 +2355,16 @@ impl eframe::App for RevEngineApp {
                                                     "DeepSeek" => std::env::var("DEEPSEEK_API_KEY"),
                                                     _ => std::env::var("REVENGINE_AI_API_KEY"),
                                                 };
-                                                if let Ok(v) = env_val {
-                                                    self.settings.provider_keys.insert(provider.into(), v);
+                                                match env_val {
+                                                    Ok(v) if !v.trim().is_empty() => {
+                                                        self.settings.provider_keys.insert(provider.into(), v);
+                                                        self.status = format!("Chave de ambiente carregada para {provider}.");
+                                                        self.log("INFO", &self.status.clone());
+                                                    }
+                                                    Ok(_) | Err(_) => {
+                                                        self.status = format!("Variável de ambiente da chave de {provider} não encontrada ou vazia.");
+                                                        self.log("AVISO", &self.status.clone());
+                                                    }
                                                 }
                                             }
                                         });
@@ -2273,8 +2381,16 @@ impl eframe::App for RevEngineApp {
                             ui.horizontal(|ui| {
                                 ui.text_edit_singleline(&mut self.settings.blender_exe);
                                 if ui.button("Auto-Detectar").clicked() {
-                                    if let Some(detected) = detect_blender() {
-                                        self.settings.blender_exe = detected;
+                                    match detect_blender() {
+                                        Some(detected) => {
+                                            self.settings.blender_exe = detected.clone();
+                                            self.status = format!("Blender encontrado: {detected}");
+                                            self.log("INFO", &self.status.clone());
+                                        }
+                                        None => {
+                                            self.status = "Blender não encontrado. Selecione o executável manualmente ou instale uma distribuição compatível.".into();
+                                            self.log("AVISO", &self.status.clone());
+                                        }
                                     }
                                 }
                                 if ui.button("Procurar...").clicked() {
@@ -2311,8 +2427,18 @@ impl eframe::App for RevEngineApp {
                     ui.separator();
                     ui.horizontal(|ui| {
                         if ui.button(egui::RichText::new("💾 Salvar Configurações").strong()).clicked() {
+                            self.settings.show_grid = self.viewport.show_grid;
+                            self.settings.show_orientation_gizmo = self.viewport.show_orientation_gizmo;
+                            self.settings.show_ground_shadows = self.viewport.show_ground_shadows;
+                            self.settings.wireframe_only = self.viewport.wireframe_only;
                             self.provider_keys = self.settings.provider_keys.clone();
                             self.blender_path = self.settings.blender_exe.clone();
+                            if let Some(endpoint) = self.settings.provider_endpoints.get(&self.ai_provider) {
+                                self.ai_endpoint = endpoint.clone();
+                            }
+                            if let Some(model) = self.settings.provider_models.get(&self.ai_provider) {
+                                self.ai_model = model.clone();
+                            }
                             self.update_active_provider_key();
                             match save_settings(&self.settings) {
                                 Ok(()) => {
@@ -2908,6 +3034,28 @@ fn main() -> eframe::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::BevySceneFile;
+
+    #[test]
+    fn vector_toolbar_buttons_render_in_headless_egui_frame() {
+        let context = egui::Context::default();
+        let _output = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let tint = egui::Color32::from_rgb(90, 150, 255);
+                for (icon, label) in [
+                    ("new", "Novo"),
+                    ("open", "Abrir"),
+                    ("save", "Salvar"),
+                    ("play", "Play"),
+                    ("stop", "Stop"),
+                ] {
+                    let response = studio_icon_button(ui, icon, label, tint);
+                    assert!(response.rect.is_positive());
+                }
+            });
+        });
+        assert!(!_output.shapes.is_empty());
+    }
 
     #[test]
     fn accepts_project_relative_asset_path() {
@@ -3037,6 +3185,49 @@ mod tests {
         assert!(temp_dir.join("Scenes").join("Main.scene.json").is_file());
         assert!(temp_dir.join("Scripts").join("cave_component.py").is_file());
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn settings_roundtrip_preserves_viewport_preferences_and_legacy_defaults() {
+        let mut settings = EngineSettings::default();
+        settings.show_grid = false;
+        settings.show_orientation_gizmo = false;
+        settings.show_ground_shadows = false;
+        settings.wireframe_only = true;
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: EngineSettings = serde_json::from_str(&encoded).unwrap();
+        assert!(!decoded.show_grid);
+        assert!(!decoded.show_orientation_gizmo);
+        assert!(!decoded.show_ground_shadows);
+        assert!(decoded.wireframe_only);
+
+        let legacy = serde_json::json!({
+            "blender_exe": "", "projects_directory": ".", "active_providers": []
+        });
+        let decoded_legacy: EngineSettings = serde_json::from_value(legacy).unwrap();
+        assert!(decoded_legacy.show_grid);
+        assert!(decoded_legacy.show_orientation_gizmo);
+        assert!(decoded_legacy.show_ground_shadows);
+        assert!(!decoded_legacy.wireframe_only);
+    }
+
+    #[test]
+    fn scene_save_produces_runtime_compatible_objects() {
+        let scene = Scene::default();
+        let encoded = serde_json::to_value(scene.to_bevy_scene_file()).unwrap();
+        assert!(
+            encoded["objects"]
+                .as_array()
+                .is_some_and(|objects| !objects.is_empty())
+        );
+        assert!(encoded["models"].as_array().is_some());
+        let runtime_file: BevySceneFile = serde_json::from_value(encoded).unwrap();
+        assert!(
+            runtime_file
+                .objects
+                .iter()
+                .any(|object| object.kind == "plane")
+        );
     }
 
     #[test]
