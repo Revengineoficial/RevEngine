@@ -541,7 +541,7 @@ impl ViewportRenderer {
         };
 
         match ent.kind.as_str() {
-            "cube" | "plane" | "model" => {
+            "cube" | "plane" => {
                 let hx = scale[0] * 0.5;
                 let hy = if ent.kind == "plane" {
                     0.05
@@ -603,6 +603,29 @@ impl ViewportRenderer {
                             Stroke::new(if is_selected { 2.0_f32 } else { 1.0_f32 }, border_color),
                         ));
                     }
+                }
+            }
+
+            // Imported GLB/GLTF assets are real mesh resources, not primitives.
+            // This lightweight editor viewport cannot rasterize their triangles;
+            // show an explicit asset marker instead of the misleading cube proxy.
+            "model" => {
+                let center = self.project(pos, rect);
+                if center.visible {
+                    let color = if is_selected {
+                        accent
+                    } else {
+                        Color32::from_rgb(120, 205, 190)
+                    };
+                    painter.circle_filled(center.screen, 10.0, Color32::from_black_alpha(150));
+                    painter.circle_stroke(center.screen, 10.0, Stroke::new(2.0_f32, color));
+                    painter.text(
+                        center.screen,
+                        egui::Align2::CENTER_CENTER,
+                        "GLB",
+                        egui::FontId::proportional(8.0),
+                        Color32::WHITE,
+                    );
                 }
             }
 

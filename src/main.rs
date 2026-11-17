@@ -1084,10 +1084,13 @@ impl RevEngineApp {
         let Some(root) = self.project_path.as_ref() else {
             return;
         };
+        // Prefer the portrait produced by the explicit elf builder, then the
+        // current generation render. Legacy generic previews are last so an old
+        // image can never mask the character that was just generated.
         for name in [
-            "blender_scene_render.png",
-            "generated_scene_render.png",
             "revengine_elf_portrait.png",
+            "generated_scene_render.png",
+            "blender_scene_render.png",
         ] {
             let p = root.join("Assets").join("Generated").join(name);
             if p.is_file() {
@@ -1207,7 +1210,7 @@ Responda com UM objeto JSON puro, sem markdown adicional:
 REGRAS FUNDAMENTAIS:
 1. NUNCA gere arquivos vazios. Crie Scenes/Main.scene.json para TODA solicitação de jogo ou modificação de cenário.
 2. Compatível com Bevy 0.16 + Rapier 3D no Runtime/ e compatível com Unity, Godot e Unreal nativamente.
-3. Se solicitado personagem, criatura ou objeto 3D, SEMPRE use blender_actions; nunca responda apenas com descrição ou cubos. Construa anatomia/proporções, silhueta, cabeça/face, mãos com dedos, pés, roupa em camadas, cabelo/pelos, acessórios, UVs, materiais PBR, iluminação, câmera, rig/armature e pose quando aplicável. Prefira malhas contínuas e topologia limpa; use peças separadas apenas onde a anatomia/roupa exigir. Gere detalhe de alta frequência sem destruir a silhueta; inclua bevels, subdivisão, weighted normals e displacement/bump quando fizer sentido. Salve .blend, exporte GLB e renderize uma imagem de inspeção. Não alegue fotorrealismo sem inspeção visual do render.
+3. Se solicitado personagem, criatura ou objeto 3D, SEMPRE use blender_actions; nunca responda apenas com descrição ou cubos. A ponte oferece a operação dedicada {"type":"create_elf"}; para qualquer pedido de elfo, use obrigatoriamente essa operação (não substitua por add_mesh/cube nem por um arquivo JSON com um cubo). Construa anatomia/proporções humanas, silhueta, cabeça/face, mãos com dedos, pés, roupa em camadas, cabelo/pelos, acessórios, UVs, materiais PBR, iluminação, câmera, rig/armature e pose quando aplicável. Prefira malhas contínuas e topologia limpa; use peças separadas apenas onde a anatomia/roupa exigir. Gere detalhe de alta frequência sem destruir a silhueta; inclua bevels, subdivisão, weighted normals e displacement/bump quando fizer sentido. Salve .blend, exporte GLB e renderize uma imagem de inspeção. Não alegue fotorrealismo sem inspeção visual do render.
 4. Para mapas completos e ambientes, use generate_environment com resolution entre 192 e 512, biome (forest/desert/snow/canyon), scatter, seed e tamanho; combine com rochas, vegetação, água, iluminação e câmera.
 5. Para animações, use create_animation_preset com preset idle/walk/run/jump/attack e target armature ou personagem; se o usuário fornecer um rig, anime os ossos existentes.
 6. Para modelos importados, preserve materiais e animações, gere UVs somente quando ausentes, configure colisão estática para cenário e salve a fonte .blend editável.
@@ -1386,24 +1389,84 @@ REGRAS FUNDAMENTAIS:
                                                             scene_json["models"] =
                                                                 serde_json::json!([]);
                                                         }
+                                                        let is_elf = actions.iter().any(|action| {
+                                                            action
+                                                                .get("type")
+                                                                .or_else(|| action.get("action"))
+                                                                .and_then(|value| value.as_str())
+                                                                .is_some_and(|kind| {
+                                                                    kind.eq_ignore_ascii_case(
+                                                                        "create_elf",
+                                                                    )
+                                                                })
+                                                        });
+                                                        let model_path = if is_elf {
+                                                            let elf_source = generated_dir
+                                                                .join("revengine_elf.glb");
+                                                            let elf_model =
+                                                                generated_dir.join("elf_model.glb");
+                                                            if elf_source.is_file() {
+                                                                match fs::copy(
+                                                                    &elf_source,
+                                                                    &elf_model,
+                                                                ) {
+                                                                    Ok(_) => {
+                                                                        "Assets/Generated/elf_model.glb"
+                                                                    }
+                                                                    Err(error) => {
+                                                                        let _ = progress_tx.send(format!("Blender › Não foi possível preparar elf_model.glb: {error}"));
+                                                                        "Assets/Generated/generated_scene.glb"
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                "Assets/Generated/generated_scene.glb"
+                                                            }
+                                                        } else {
+                                                            "Assets/Generated/generated_scene.glb"
+                                                        };
                                                         if let Some(models) =
                                                             scene_json["models"].as_array_mut()
                                                         {
-                                                            models.retain(|m| m.get("path").and_then(|p| p.as_str()) != Some("Assets/Generated/generated_scene.glb"));
-                                                            models.push(serde_json::json!({"path":"Assets/Generated/generated_scene.glb","position":[0.0,0.0,0.0],"scale":1.0}));
+                                                            models.retain(|m| {
+                                                                m.get("path")
+                                                                    .and_then(|p| p.as_str())
+                                                                    != Some(model_path)
+                                                            });
+                                                            models.push(serde_json::json!({"path":model_path,"position":[0.0,0.0,0.0],"scale":1.0}));
                                                         }
                                                         if let Ok(bytes) =
                                                             serde_json::to_vec_pretty(&scene_json)
                                                         {
                                                             if fs::write(&scene_file, bytes).is_ok()
                                                             {
+                                                                if is_elf {
+                                                                    for asset in [
+                                                                        "Assets/Generated/elf_model.glb",
+                                                                        "Assets/Generated/revengine_elf.blend",
+                                                                        "Assets/Generated/revengine_elf_portrait.png",
+                                                                    ] {
+                                                                        if root
+                                                                            .join(asset)
+                                                                            .is_file()
+                                                                            && !saved_files
+                                                                                .iter()
+                                                                                .any(|saved| {
+                                                                                    saved == asset
+                                                                                })
+                                                                        {
+                                                                            saved_files.push(
+                                                                                asset.to_string(),
+                                                                            );
+                                                                        }
+                                                                    }
+                                                                }
                                                                 reload_scene = true;
                                                                 // Prefer reloading the merged on-disk scene, preserving both
                                                                 // AI-authored objects and the Blender-generated model reference.
                                                                 spawned_scene = None;
                                                             }
                                                         }
-                                                        let _ = progress_tx.send(format!("Blender › Geração validada: .blend ({} bytes), GLB ({} bytes), render ({} bytes). Modelo inserido na cena do jogo.", fs::metadata(&blend).map(|m| m.len()).unwrap_or(0), fs::metadata(&glb).map(|m| m.len()).unwrap_or(0), fs::metadata(&render).map(|m| m.len()).unwrap_or(0)));
+                                                        let _ = progress_tx.send(format!("Blender › Geração validada: .blend ({} bytes), GLB ({} bytes), render ({} bytes). {} inserido na cena do jogo.", fs::metadata(&blend).map(|m| m.len()).unwrap_or(0), fs::metadata(&glb).map(|m| m.len()).unwrap_or(0), fs::metadata(&render).map(|m| m.len()).unwrap_or(0), model_path));
                                                     } else {
                                                         let _ = progress_tx.send("Blender › Geração incompleta: eram obrigatórios .blend, .glb e generated_scene_render.png. Nenhum resultado foi marcado como concluído.".into());
                                                     }
@@ -3227,6 +3290,28 @@ mod tests {
                 .objects
                 .iter()
                 .any(|object| object.kind == "plane")
+        );
+    }
+
+    #[test]
+    fn blender_generated_elf_glb_is_loaded_as_model_not_cube() {
+        let mut scene = Scene::default();
+        scene.load_from_bevy_json(r#"{"name":"Main","objects":[],"models":[{"path":"Assets/Generated/elf_model.glb","position":[0.0,0.0,0.0],"scale":1.0}]}"#).unwrap();
+        let model = scene
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "model")
+            .unwrap();
+        assert_eq!(model.name, "elf_model");
+        assert_eq!(
+            model.model_path.as_deref(),
+            Some("Assets/Generated/elf_model.glb")
+        );
+        assert!(
+            !scene
+                .entities
+                .iter()
+                .any(|entity| entity.name == "HeroCube")
         );
     }
 
