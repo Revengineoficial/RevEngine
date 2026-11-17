@@ -76,7 +76,11 @@ pub fn install_project_scaffolding(project_dir: &Path) -> Result<(), String> {
     for d in &dirs {
         let full = project_dir.join(d);
         fs::create_dir_all(&full).map_err(|e| {
-            format!("Não foi possível criar o diretório '{}': {}", full.display(), e)
+            format!(
+                "Não foi possível criar o diretório '{}': {}",
+                full.display(),
+                e
+            )
         })?;
     }
 
@@ -87,9 +91,8 @@ pub fn install_project_scaffolding(project_dir: &Path) -> Result<(), String> {
             let _ = fs::create_dir_all(parent);
         }
         if !target.exists() {
-            fs::write(&target, content).map_err(|e| {
-                format!("Falha ao gravar '{}': {}", target.display(), e)
-            })?;
+            fs::write(&target, content)
+                .map_err(|e| format!("Falha ao gravar '{}': {}", target.display(), e))?;
         }
         Ok(())
     };
@@ -105,7 +108,10 @@ pub fn install_project_scaffolding(project_dir: &Path) -> Result<(), String> {
     // Create a project README if none exists
     let project_readme = format!(
         "# {}\n\nCriado com RevEngine Studio.\n\n- Pressione 'Executar jogo' para rodar o runtime Bevy nativo.\n- Integre com Godot, Unity, Unreal e Blender diretamente no menu de Integrações.\n",
-        project_dir.file_name().and_then(|n| n.to_str()).unwrap_or("Projeto RevEngine")
+        project_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Projeto RevEngine")
     );
     write_safe("README.md", &project_readme)?;
 

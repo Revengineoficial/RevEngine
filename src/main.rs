@@ -19,7 +19,9 @@ mod viewport_3d;
 
 use converters::UniversalConverter;
 use doctor::{DependencyDoctor, DependencyStatus};
-use integrations::{BlenderBridge, GodotBridge, RobloxBridge, UnityBridge, UniversalEngineExporter, UnrealBridge};
+use integrations::{
+    BlenderBridge, GodotBridge, RobloxBridge, UnityBridge, UniversalEngineExporter, UnrealBridge,
+};
 use optimizer::{AutoOptimizer, OptimizationReport};
 use procedural_scenes::ProceduralSceneGenerator;
 use scene::{Entity, Scene};
@@ -123,25 +125,46 @@ impl Default for EngineSettings {
                 ),
                 ("Claude".into(), "https://api.anthropic.com/v1".into()),
                 ("DeepSeek".into(), "https://api.deepseek.com/v1".into()),
-                ("Custom / Local (LM Studio / Ollama)".into(), "http://localhost:1234/v1".into()),
+                (
+                    "Custom / Local (LM Studio / Ollama)".into(),
+                    "http://localhost:1234/v1".into(),
+                ),
             ]
             .into_iter()
             .collect(),
             provider_keys: [
-                ("NVIDIA".into(), std::env::var("NVIDIA_API_KEY").unwrap_or_default()),
-                ("OpenAI / ChatGPT".into(), std::env::var("OPENAI_API_KEY").unwrap_or_default()),
-                ("Claude".into(), std::env::var("ANTHROPIC_API_KEY").unwrap_or_default()),
-                ("DeepSeek".into(), std::env::var("DEEPSEEK_API_KEY").unwrap_or_default()),
+                (
+                    "NVIDIA".into(),
+                    std::env::var("NVIDIA_API_KEY").unwrap_or_default(),
+                ),
+                (
+                    "OpenAI / ChatGPT".into(),
+                    std::env::var("OPENAI_API_KEY").unwrap_or_default(),
+                ),
+                (
+                    "Claude".into(),
+                    std::env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
+                ),
+                (
+                    "DeepSeek".into(),
+                    std::env::var("DEEPSEEK_API_KEY").unwrap_or_default(),
+                ),
                 ("Custom / Local (LM Studio / Ollama)".into(), String::new()),
             ]
             .into_iter()
             .collect(),
             provider_models: [
-                ("NVIDIA".into(), "nvidia/nemotron-3.5-lightning-30b-a3b".into()),
+                (
+                    "NVIDIA".into(),
+                    "nvidia/nemotron-3.5-lightning-30b-a3b".into(),
+                ),
                 ("OpenAI / ChatGPT".into(), "gpt-4o-mini".into()),
                 ("Claude".into(), "claude-3-5-sonnet-20241022".into()),
                 ("DeepSeek".into(), "deepseek-chat".into()),
-                ("Custom / Local (LM Studio / Ollama)".into(), "local-model".into()),
+                (
+                    "Custom / Local (LM Studio / Ollama)".into(),
+                    "local-model".into(),
+                ),
             ]
             .into_iter()
             .collect(),
@@ -311,11 +334,14 @@ impl Default for RevEngineApp {
 
         // Ensure default providers exist in provider_keys
         for p in &settings.active_providers {
-            provider_keys.entry(p.clone()).or_insert_with(String::new);
+            provider_keys.entry(p.clone()).or_default();
         }
 
         let initial_provider = "NVIDIA".to_string();
-        let initial_key = provider_keys.get(&initial_provider).cloned().unwrap_or_default();
+        let initial_key = provider_keys
+            .get(&initial_provider)
+            .cloned()
+            .unwrap_or_default();
         let initial_endpoint = settings
             .provider_endpoints
             .get(&initial_provider)
@@ -328,7 +354,8 @@ impl Default for RevEngineApp {
             .unwrap_or_else(|| "nvidia/nemotron-3.5-lightning-30b-a3b".into());
 
         // Auto-initialize default project so files, assets, and scenes are live from start
-        let default_proj_dir = PathBuf::from(&settings.projects_directory).join("Meu primeiro jogo");
+        let default_proj_dir =
+            PathBuf::from(&settings.projects_directory).join("Meu primeiro jogo");
         if !default_proj_dir.exists() {
             let _ = embedded_templates::install_project_scaffolding(&default_proj_dir);
         }
@@ -408,7 +435,10 @@ impl Default for RevEngineApp {
             simulation_time_sec: 0.0,
         };
 
-        app.log("INFO", "RevEngine Studio iniciado com sucesso. Interface Studio Dark carregada.");
+        app.log(
+            "INFO",
+            "RevEngine Studio iniciado com sucesso. Interface Studio Dark carregada.",
+        );
         app
     }
 }
@@ -447,7 +477,14 @@ impl RevEngineApp {
             let mut ent = if o.kind == "plane" {
                 Entity::new_plane(id, &o.name, o.position, 20.0, [0.15, 0.18, 0.25, 1.0])
             } else if o.kind.to_lowercase().contains("light") {
-                Entity::new_light(id, &o.name, o.position, "directional", [1.0, 0.95, 0.85], 14000.0)
+                Entity::new_light(
+                    id,
+                    &o.name,
+                    o.position,
+                    "directional",
+                    [1.0, 0.95, 0.85],
+                    14000.0,
+                )
             } else if o.kind.to_lowercase().contains("camera") {
                 Entity::new_camera(id, &o.name, o.position)
             } else {
@@ -489,12 +526,18 @@ impl RevEngineApp {
             .map_err(|e| e.to_string())
             .and_then(|s| fs::write(root.join("project.rev"), s).map_err(|e| e.to_string()));
 
-        let scene_file = root.join("Scenes").join(format!("{}.scene.json", self.project.startup_scene));
+        let scene_file = root
+            .join("Scenes")
+            .join(format!("{}.scene.json", self.project.startup_scene));
         let scene_res = self.active_scene.save_to_file(&scene_file);
 
         match (proj_res, scene_res) {
             (Ok(()), Ok(())) => {
-                let msg = format!("Projeto '{}' e cena salvos com sucesso: {}", self.project.name, root.display());
+                let msg = format!(
+                    "Projeto '{}' e cena salvos com sucesso: {}",
+                    self.project.name,
+                    root.display()
+                );
                 self.status = msg.clone();
                 self.log("INFO", &msg);
             }
@@ -520,7 +563,10 @@ impl RevEngineApp {
         };
         if let Some(file) = rfd::FileDialog::new()
             .set_directory(start)
-            .add_filter("Projeto RevEngine ou Cena", &["rev", "json", "tscn", "unity", "blend"])
+            .add_filter(
+                "Projeto RevEngine ou Cena",
+                &["rev", "json", "tscn", "unity", "blend"],
+            )
             .pick_file()
         {
             self.open_path(&file);
@@ -528,7 +574,11 @@ impl RevEngineApp {
     }
 
     pub fn open_path(&mut self, file: &Path) {
-        let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        let ext = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         if ext == "rev" {
             match fs::read_to_string(file)
                 .ok()
@@ -593,7 +643,10 @@ impl RevEngineApp {
                 Ok(()) => {
                     self.project = Project::default();
                     self.project.name = if clean_name.is_empty() {
-                        dir.file_name().and_then(|n| n.to_str()).unwrap_or("Meu Jogo").to_string()
+                        dir.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("Meu Jogo")
+                            .to_string()
                     } else {
                         clean_name.to_string()
                     };
@@ -607,11 +660,17 @@ impl RevEngineApp {
 
                     self.active_scene = Scene::default();
                     self.active_scene.name = self.project.startup_scene.clone();
-                    let _ = self.active_scene.save_to_file(&dir.join("Scenes").join("Main.scene.json"));
+                    let _ = self
+                        .active_scene
+                        .save_to_file(&dir.join("Scenes").join("Main.scene.json"));
                     self.sync_scene_to_project();
 
                     self.save();
-                    let msg = format!("Projeto '{}' criado com sucesso em '{}'!", self.project.name, dir.display());
+                    let msg = format!(
+                        "Projeto '{}' criado com sucesso em '{}'!",
+                        self.project.name,
+                        dir.display()
+                    );
                     self.status = msg.clone();
                     self.log("INFO", &msg);
                 }
@@ -640,7 +699,9 @@ impl RevEngineApp {
             }
         }
 
-        let _ = self.active_scene.save_to_file(&root.join("Scenes").join("Main.scene.json"));
+        let _ = self
+            .active_scene
+            .save_to_file(&root.join("Scenes").join("Main.scene.json"));
 
         match std::process::Command::new("cargo")
             .args(["run", "--release", "--manifest-path"])
@@ -651,12 +712,15 @@ impl RevEngineApp {
             Ok(_) => {
                 self.is_simulating = true;
                 self.simulation_start = Some(Instant::now());
-                let msg = "Runtime iniciado: compilando e executando o jogo com Bevy + Rapier 3D.".to_string();
+                let msg = "Runtime iniciado: compilando e executando o jogo com Bevy + Rapier 3D."
+                    .to_string();
                 self.status = msg.clone();
                 self.log("INFO", &msg);
             }
             Err(e) => {
-                let err = format!("Não foi possível iniciar o runtime. Verifique a instalação do Rust/Cargo: {e}");
+                let err = format!(
+                    "Não foi possível iniciar o runtime. Verifique a instalação do Rust/Cargo: {e}"
+                );
                 self.status = err.clone();
                 self.log("ERRO", &err);
             }
@@ -680,7 +744,9 @@ impl RevEngineApp {
                 e.kind = "sphere".into();
                 e
             }
-            "Plane" | "plane" => Entity::new_plane(id, &name, [0.0, 0.0, 0.0], 15.0, [0.2, 0.25, 0.35, 1.0]),
+            "Plane" | "plane" => {
+                Entity::new_plane(id, &name, [0.0, 0.0, 0.0], 15.0, [0.2, 0.25, 0.35, 1.0])
+            }
             "Cylinder" | "cylinder" => {
                 let mut e = Entity::new_cube(id, &name, pos, 1.5, [0.25, 0.75, 0.35, 1.0]);
                 e.kind = "cylinder".into();
@@ -691,7 +757,9 @@ impl RevEngineApp {
                 e.kind = "capsule".into();
                 e
             }
-            "Light" | "light" => Entity::new_light(id, &name, [3.0, 6.0, 3.0], "point", [1.0, 0.9, 0.7], 5000.0),
+            "Light" | "light" => {
+                Entity::new_light(id, &name, [3.0, 6.0, 3.0], "point", [1.0, 0.9, 0.7], 5000.0)
+            }
             "Camera" | "camera" => Entity::new_camera(id, &name, [0.0, 3.0, 8.0]),
             _ => Entity::new_cube(id, &name, pos, 1.5, [0.25, 0.55, 0.95, 1.0]),
         };
@@ -714,7 +782,10 @@ impl RevEngineApp {
         if let Some(file) = rfd::FileDialog::new()
             .add_filter(
                 "Todos os Assets Suportados",
-                &["glb", "gltf", "obj", "fbx", "blend", "png", "jpg", "jpeg", "tscn", "unity", "prefab", "rbxlx", "rbxm", "lua", "luau", "py"],
+                &[
+                    "glb", "gltf", "obj", "fbx", "blend", "png", "jpg", "jpeg", "tscn", "unity",
+                    "prefab", "rbxlx", "rbxm", "lua", "luau", "py",
+                ],
             )
             .pick_file()
         {
@@ -743,7 +814,10 @@ impl RevEngineApp {
             return;
         }
 
-        self.log("BLENDER", "Iniciando sincronização de cena com o Blender...");
+        self.log(
+            "BLENDER",
+            "Iniciando sincronização de cena com o Blender...",
+        );
         match BlenderBridge::sync_scene_to_blender(&self.active_scene, &self.blender_path, &root) {
             Ok(glb) => {
                 let msg = format!("Blender exportou com sucesso a cena GLB em '{}'!", glb);
@@ -774,7 +848,10 @@ impl RevEngineApp {
                     if let Ok(img) = image::load_from_memory(&bytes) {
                         let rgba = img.to_rgba8();
                         let size = [rgba.width() as usize, rgba.height() as usize];
-                        let _color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_flat_samples().as_slice());
+                        let _color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            size,
+                            rgba.as_flat_samples().as_slice(),
+                        );
                         self.asset_search = name.to_string();
                         break;
                     }
@@ -808,16 +885,24 @@ impl RevEngineApp {
         let provider = self.ai_provider.clone();
 
         // 1. Check if key is configured in settings or in-memory
-        let mut key = self.provider_keys.get(&provider).cloned().unwrap_or_default();
+        let mut key = self
+            .provider_keys
+            .get(&provider)
+            .cloned()
+            .unwrap_or_default();
         if key.trim().is_empty() {
             key = self.ai_key.trim().to_string();
         }
         if key.trim().is_empty() {
             key = match provider.as_str() {
-                "NVIDIA" => std::env::var("NVIDIA_API_KEY").or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
-                "OpenAI / ChatGPT" => std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
-                "Claude" => std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
-                "DeepSeek" => std::env::var("DEEPSEEK_API_KEY").or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
+                "NVIDIA" => std::env::var("NVIDIA_API_KEY")
+                    .or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
+                "OpenAI / ChatGPT" => std::env::var("OPENAI_API_KEY")
+                    .or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
+                "Claude" => std::env::var("ANTHROPIC_API_KEY")
+                    .or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
+                "DeepSeek" => std::env::var("DEEPSEEK_API_KEY")
+                    .or_else(|_| std::env::var("REVENGINE_AI_API_KEY")),
                 _ => std::env::var("REVENGINE_AI_API_KEY"),
             }
             .unwrap_or_default();
@@ -825,7 +910,8 @@ impl RevEngineApp {
 
         let endpoint = self.ai_endpoint.clone();
         let model = self.ai_model.clone();
-        let default_project_root = PathBuf::from(&self.settings.projects_directory).join("Meu primeiro jogo");
+        let default_project_root =
+            PathBuf::from(&self.settings.projects_directory).join("Meu primeiro jogo");
         if !default_project_root.exists() {
             let _ = embedded_templates::install_project_scaffolding(&default_project_root);
         }
@@ -905,20 +991,29 @@ REGRAS FUNDAMENTAIS:
                     req = req.header("Authorization", format!("Bearer {key}"));
                 }
 
-                let response = req.send().map_err(|e| format!("Falha de conexão com provedor: {e}"))?;
+                let response = req
+                    .send()
+                    .map_err(|e| format!("Falha de conexão com provedor: {e}"))?;
                 let status = response.status();
-                let text = response.text().map_err(|e| format!("Falha ao ler resposta HTTP: {e}"))?;
+                let text = response
+                    .text()
+                    .map_err(|e| format!("Falha ao ler resposta HTTP: {e}"))?;
 
                 if !status.is_success() {
                     return Err(format!("Erro da API ({status}): {text}"));
                 }
 
                 let raw_content = if provider == "Claude" {
-                    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                    let v: serde_json::Value =
+                        serde_json::from_str(&text).map_err(|e| e.to_string())?;
                     v["content"][0]["text"].as_str().unwrap_or("").to_string()
                 } else {
-                    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                    v["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string()
+                    let v: serde_json::Value =
+                        serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                    v["choices"][0]["message"]["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string()
                 };
 
                 let payload_opt = extract_json_payload(&raw_content).ok();
@@ -937,7 +1032,9 @@ REGRAS FUNDAMENTAIS:
                 if let Some(payload) = &payload_opt {
                     if let Some(files) = payload["files"].as_array() {
                         for item in files {
-                            if let (Some(rel), Some(content)) = (item["path"].as_str(), item["content"].as_str()) {
+                            if let (Some(rel), Some(content)) =
+                                (item["path"].as_str(), item["content"].as_str())
+                            {
                                 if is_safe_relative_path(rel) {
                                     let target = root.join(rel);
                                     if let Some(parent) = target.parent() {
@@ -961,11 +1058,14 @@ REGRAS FUNDAMENTAIS:
                     if let Some(actions) = payload["blender_actions"].as_array() {
                         if !actions.is_empty() {
                             if let Some(exe) = blender.as_ref() {
-                                let _ = progress_tx.send("RevAI › Executando modelagem no Blender...".into());
+                                let _ = progress_tx
+                                    .send("RevAI › Executando modelagem no Blender...".into());
                                 let control = root.join(".revengine");
                                 let _ = fs::create_dir_all(&control);
                                 let plan = control.join("blender_plan.json");
-                                if let Ok(json_bytes) = serde_json::to_vec_pretty(&serde_json::json!({"actions": actions})) {
+                                if let Ok(json_bytes) = serde_json::to_vec_pretty(
+                                    &serde_json::json!({"actions": actions}),
+                                ) {
                                     let _ = fs::write(&plan, json_bytes);
                                     if let Ok(mut child) = std::process::Command::new(exe)
                                         .args(["--background", "--python"])
@@ -980,8 +1080,12 @@ REGRAS FUNDAMENTAIS:
                                         .spawn()
                                     {
                                         if let Some(stdout) = child.stdout.take() {
-                                            for line in std::io::BufReader::new(stdout).lines().flatten() {
-                                                let _ = progress_tx.send(format!("Blender › {line}"));
+                                            for line in std::io::BufReader::new(stdout)
+                                                .lines()
+                                                .map_while(Result::ok)
+                                            {
+                                                let _ =
+                                                    progress_tx.send(format!("Blender › {line}"));
                                             }
                                         }
                                         let _ = child.wait();
@@ -995,8 +1099,14 @@ REGRAS FUNDAMENTAIS:
 
                 // 2. Real-Time Procedural Scene Generator (Ensures Viewport NEVER stays empty!)
                 if spawned_scene.is_none() {
-                    if let Some(proc_scene) = ProceduralSceneGenerator::match_or_generate_scene(&prompt, &message) {
-                        let _ = progress_tx.send(format!("RevAI › ⚡ Gerando ambiente 3D procedural: '{}' com {} entidades...", proc_scene.name, proc_scene.entities.len()));
+                    if let Some(proc_scene) =
+                        ProceduralSceneGenerator::match_or_generate_scene(&prompt, &message)
+                    {
+                        let _ = progress_tx.send(format!(
+                            "RevAI › ⚡ Gerando ambiente 3D procedural: '{}' com {} entidades...",
+                            proc_scene.name,
+                            proc_scene.entities.len()
+                        ));
                         let scene_dir = root.join("Scenes");
                         let _ = fs::create_dir_all(&scene_dir);
                         let scene_path = scene_dir.join("Main.scene.json");
@@ -1011,20 +1121,38 @@ REGRAS FUNDAMENTAIS:
                 // 3. Native Roblox & Universal Engine Auto-Export
                 if let Some(sc) = &spawned_scene {
                     let p_lower = prompt.to_lowercase();
-                    if p_lower.contains("roblox") || p_lower.contains("lua") || p_lower.contains("obby") || p_lower.contains("luau") {
+                    if p_lower.contains("roblox")
+                        || p_lower.contains("lua")
+                        || p_lower.contains("obby")
+                        || p_lower.contains("luau")
+                    {
                         if let Ok(rbx_path) = RobloxBridge::export_project(sc, &root) {
                             let clean_name = sc.name.replace(' ', "_");
                             saved_files.push(format!("Integrations/Roblox/{clean_name}.rbxlx"));
-                            saved_files.push("Integrations/Roblox/src/server/GameManager.server.luau".into());
-                            saved_files.push("Integrations/Roblox/src/client/CameraController.client.luau".into());
-                            saved_files.push("Integrations/Roblox/src/shared/GameConfig.luau".into());
-                            let _ = progress_tx.send(format!("RevAI › 🧱 Jogo Roblox exportado com sucesso: {rbx_path}"));
+                            saved_files.push(
+                                "Integrations/Roblox/src/server/GameManager.server.luau".into(),
+                            );
+                            saved_files.push(
+                                "Integrations/Roblox/src/client/CameraController.client.luau"
+                                    .into(),
+                            );
+                            saved_files
+                                .push("Integrations/Roblox/src/shared/GameConfig.luau".into());
+                            let _ = progress_tx.send(format!(
+                                "RevAI › 🧱 Jogo Roblox exportado com sucesso: {rbx_path}"
+                            ));
                         }
                     }
 
-                    if p_lower.contains("engine") || p_lower.contains("todas") || p_lower.contains("oficial") || p_lower.contains("universal") {
+                    if p_lower.contains("engine")
+                        || p_lower.contains("todas")
+                        || p_lower.contains("oficial")
+                        || p_lower.contains("universal")
+                    {
                         let b_str = blender.as_deref().unwrap_or("");
-                        if let Ok(summary) = UniversalEngineExporter::export_all_targets(sc, &root, b_str) {
+                        if let Ok(summary) =
+                            UniversalEngineExporter::export_all_targets(sc, &root, b_str)
+                        {
                             let _ = progress_tx.send(format!("RevAI › 🌐 Projeto universal exportado para {} motores (Roblox, Godot, Unity, Unreal, C++, C#, Lua)!", summary.engines_exported.len()));
                         }
                     }
@@ -1073,7 +1201,11 @@ impl eframe::App for RevEngineApp {
         }
 
         // 1. Process streaming progress from RevAI
-        while let Some(prog) = self.chat_progress_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        while let Some(prog) = self
+            .chat_progress_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
             if let Some((_, last_msg)) = self.chat_history.last_mut() {
                 last_msg.push_str("\n");
                 last_msg.push_str(&prog);
@@ -1100,13 +1232,27 @@ impl eframe::App for RevEngineApp {
                         self.active_scene = new_sc;
                         self.sync_scene_to_project();
                         if self.project_path.is_none() {
-                            self.project_path = Some(PathBuf::from(&self.settings.projects_directory).join("Meu primeiro jogo"));
+                            self.project_path = Some(
+                                PathBuf::from(&self.settings.projects_directory)
+                                    .join("Meu primeiro jogo"),
+                            );
                         }
                         if let Some(root) = &self.project_path {
-                            let _ = self.active_scene.save_to_file(&root.join("Scenes").join("Main.scene.json"));
+                            let _ = self
+                                .active_scene
+                                .save_to_file(&root.join("Scenes").join("Main.scene.json"));
                         }
-                        self.status = format!("⚡ Cena 3D atualizada em tempo real: {} objetos gerados!", self.active_scene.entities.len());
-                        self.log("REVAI", &format!("Cena 3D atualizada no Viewport com {} entidades ativas.", self.active_scene.entities.len()));
+                        self.status = format!(
+                            "⚡ Cena 3D atualizada em tempo real: {} objetos gerados!",
+                            self.active_scene.entities.len()
+                        );
+                        self.log(
+                            "REVAI",
+                            &format!(
+                                "Cena 3D atualizada no Viewport com {} entidades ativas.",
+                                self.active_scene.entities.len()
+                            ),
+                        );
                         self.refresh_blender_preview();
                     } else if ai_res.reload_scene {
                         if let Some(root) = &self.project_path {
@@ -1114,8 +1260,12 @@ impl eframe::App for RevEngineApp {
                             if scene_path.is_file() {
                                 if let Ok(()) = self.active_scene.load_from_file(&scene_path) {
                                     self.sync_scene_to_project();
-                                    self.status = "⚡ Cena 3D atualizada em tempo real pela RevAI!".into();
-                                    self.log("REVAI", "Cena 3D atualizada em tempo real no Viewport.");
+                                    self.status =
+                                        "⚡ Cena 3D atualizada em tempo real pela RevAI!".into();
+                                    self.log(
+                                        "REVAI",
+                                        "Cena 3D atualizada em tempo real no Viewport.",
+                                    );
                                 }
                             }
                         }
@@ -1125,7 +1275,8 @@ impl eframe::App for RevEngineApp {
                     self.chat_history.push(("RevAI".into(), full_text));
                 }
                 Err(err) => {
-                    self.chat_history.push(("RevAI [Erro]".into(), format!("Falha na execução: {err}")));
+                    self.chat_history
+                        .push(("RevAI [Erro]".into(), format!("Falha na execução: {err}")));
                     self.status = format!("Erro RevAI: {err}");
                     self.log("ERRO", &err);
                 }
@@ -1158,28 +1309,53 @@ impl eframe::App for RevEngineApp {
 
                     // --- SIMULATION CONTROLS ---
                     if !self.is_simulating {
-                        if ui.button(egui::RichText::new("▶ Play").color(success).strong()).clicked() {
+                        if ui
+                            .button(egui::RichText::new("▶ Play").color(success).strong())
+                            .clicked()
+                        {
                             self.run_game();
                         }
                     } else {
-                        if ui.button(egui::RichText::new("⏹ Stop").color(egui::Color32::from_rgb(240, 80, 80)).strong()).clicked() {
+                        if ui
+                            .button(
+                                egui::RichText::new("⏹ Stop")
+                                    .color(egui::Color32::from_rgb(240, 80, 80))
+                                    .strong(),
+                            )
+                            .clicked()
+                        {
                             self.stop_simulation();
                         }
                     }
 
                     if self.is_simulating {
                         ui.label(
-                            egui::RichText::new(format!("● SIMULANDO: {:.1}s", self.simulation_time_sec))
-                                .color(success)
-                                .monospace(),
+                            egui::RichText::new(format!(
+                                "● SIMULANDO: {:.1}s",
+                                self.simulation_time_sec
+                            ))
+                            .color(success)
+                            .monospace(),
                         );
                     }
                     ui.separator();
 
                     // Tool Modes
-                    ui.selectable_value(&mut self.viewport.transform_mode, TransformToolMode::Translate, "✥ Mover (W)");
-                    ui.selectable_value(&mut self.viewport.transform_mode, TransformToolMode::Rotate, "⟳ Girar (E)");
-                    ui.selectable_value(&mut self.viewport.transform_mode, TransformToolMode::Scale, "⤢ Escala (R)");
+                    ui.selectable_value(
+                        &mut self.viewport.transform_mode,
+                        TransformToolMode::Translate,
+                        "✥ Mover (W)",
+                    );
+                    ui.selectable_value(
+                        &mut self.viewport.transform_mode,
+                        TransformToolMode::Rotate,
+                        "⟳ Girar (E)",
+                    );
+                    ui.selectable_value(
+                        &mut self.viewport.transform_mode,
+                        TransformToolMode::Scale,
+                        "⤢ Escala (R)",
+                    );
                     ui.separator();
 
                     // Main Docks & Dialogs
@@ -1189,7 +1365,10 @@ impl eframe::App for RevEngineApp {
                     if ui.button("⚡ Otimizador").clicked() {
                         self.show_optimizer = true;
                         let mut scene_clone = self.active_scene.clone();
-                        let report = AutoOptimizer::optimize_all(&mut scene_clone, self.project_path.as_deref());
+                        let report = AutoOptimizer::optimize_all(
+                            &mut scene_clone,
+                            self.project_path.as_deref(),
+                        );
                         self.active_scene = scene_clone;
                         self.sync_scene_to_project();
                         self.optimizer_report = Some(report);
@@ -1211,9 +1390,12 @@ impl eframe::App for RevEngineApp {
                             self.show_about = true;
                         }
                         ui.label(
-                            egui::RichText::new(format!("{} › {}", self.project.name, self.active_scene.name))
-                                .small()
-                                .color(egui::Color32::from_gray(160)),
+                            egui::RichText::new(format!(
+                                "{} › {}",
+                                self.project.name, self.active_scene.name
+                            ))
+                            .small()
+                            .color(egui::Color32::from_gray(160)),
                         );
                     });
                 });
@@ -1224,7 +1406,14 @@ impl eframe::App for RevEngineApp {
             .frame(egui::Frame::default().fill(bar_bg).inner_margin(5.0))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.small_button(if self.drawer_open { "▼ Ocultar Gaveta" } else { "▲ Console & Gaveta" }).clicked() {
+                    if ui
+                        .small_button(if self.drawer_open {
+                            "▼ Ocultar Gaveta"
+                        } else {
+                            "▲ Console & Gaveta"
+                        })
+                        .clicked()
+                    {
                         self.drawer_open = !self.drawer_open;
                     }
                     ui.separator();
@@ -1234,7 +1423,11 @@ impl eframe::App for RevEngineApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(format!(
                             "Grade: {}  |  Câmera: {:.1}x  |  Entidades: {}  |  {}",
-                            if self.viewport.show_grid { "Ligada" } else { "Desligada" },
+                            if self.viewport.show_grid {
+                                "Ligada"
+                            } else {
+                                "Desligada"
+                            },
                             self.viewport.camera_speed,
                             self.active_scene.entities.len(),
                             self.project.dimension
@@ -1424,36 +1617,54 @@ impl eframe::App for RevEngineApp {
                 ui.separator();
 
                 let search_lower = self.search_entity.to_lowercase();
-                egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-                    for ent in &self.active_scene.entities {
-                        if !search_lower.is_empty() && !ent.name.to_lowercase().contains(&search_lower) {
-                            continue;
-                        }
-                        let is_selected = self.viewport.selected_id == Some(ent.id);
-                        let icon = match ent.kind.as_str() {
-                            "light" => "☀",
-                            "camera" => "📷",
-                            "plane" => "▤",
-                            "model" => "🧊",
-                            _ => "◇",
-                        };
-                        let label = format!("{}  {}", icon, ent.name);
-                        if ui.selectable_label(is_selected, label).clicked() {
-                            self.viewport.selected_id = Some(ent.id);
-                            if let Some(idx) = self.project.objects.iter().position(|o| o.name == ent.name) {
-                                self.selected = idx;
+                egui::ScrollArea::vertical()
+                    .max_height(280.0)
+                    .show(ui, |ui| {
+                        for ent in &self.active_scene.entities {
+                            if !search_lower.is_empty()
+                                && !ent.name.to_lowercase().contains(&search_lower)
+                            {
+                                continue;
+                            }
+                            let is_selected = self.viewport.selected_id == Some(ent.id);
+                            let icon = match ent.kind.as_str() {
+                                "light" => "☀",
+                                "camera" => "📷",
+                                "plane" => "▤",
+                                "model" => "🧊",
+                                _ => "◇",
+                            };
+                            let label = format!("{}  {}", icon, ent.name);
+                            if ui.selectable_label(is_selected, label).clicked() {
+                                self.viewport.selected_id = Some(ent.id);
+                                if let Some(idx) =
+                                    self.project.objects.iter().position(|o| o.name == ent.name)
+                                {
+                                    self.selected = idx;
+                                }
                             }
                         }
-                    }
-                });
+                    });
 
                 ui.separator();
                 ui.heading("NAVEGAÇÃO");
-                if ui.selectable_label(self.drawer_tab == "ContentBrowser" && self.drawer_open, "▧ Assets do Projeto").clicked() {
+                if ui
+                    .selectable_label(
+                        self.drawer_tab == "ContentBrowser" && self.drawer_open,
+                        "▧ Assets do Projeto",
+                    )
+                    .clicked()
+                {
                     self.drawer_open = true;
                     self.drawer_tab = "ContentBrowser".into();
                 }
-                if ui.selectable_label(self.drawer_tab == "ScriptEditor" && self.drawer_open, "⌘ Scripts Python / Rust").clicked() {
+                if ui
+                    .selectable_label(
+                        self.drawer_tab == "ScriptEditor" && self.drawer_open,
+                        "⌘ Scripts Python / Rust",
+                    )
+                    .clicked()
+                {
                     self.drawer_open = true;
                     self.drawer_tab = "ScriptEditor".into();
                 }
@@ -1659,7 +1870,8 @@ impl eframe::App for RevEngineApp {
             });
             ui.separator();
 
-            self.viewport.draw(ui, &self.active_scene, &self.blender_preview, accent);
+            self.viewport
+                .draw(ui, &self.active_scene, &self.blender_preview, accent);
         });
 
         // 9. Modal Windows
@@ -1692,7 +1904,7 @@ impl eframe::App for RevEngineApp {
                                     ui.group(|ui| {
                                         ui.horizontal(|ui| {
                                             ui.heading(provider);
-                                            let key_val = self.settings.provider_keys.entry(provider.into()).or_insert_with(String::new);
+                                            let key_val = self.settings.provider_keys.entry(provider.into()).or_default();
                                             let is_filled = !key_val.trim().is_empty();
                                             if is_filled {
                                                 ui.label(egui::RichText::new("✔ Configurada").color(success).small());
@@ -1719,7 +1931,7 @@ impl eframe::App for RevEngineApp {
                                         ui.horizontal(|ui| {
                                             ui.label("Chave de API (API Key):");
                                             let is_visible = self.show_key_visibility.entry(provider.into()).or_insert(false);
-                                            let key_entry = self.settings.provider_keys.entry(provider.into()).or_insert_with(String::new);
+                                            let key_entry = self.settings.provider_keys.entry(provider.into()).or_default();
 
                                             if *is_visible {
                                                 ui.text_edit_singleline(key_entry);
@@ -1824,7 +2036,11 @@ impl eframe::App for RevEngineApp {
                     ui.text_edit_singleline(&mut self.new_name);
                     ui.label("Dimensão:");
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.new_dimension, "3D".into(), "3D Nativo (Bevy/OpenGL)");
+                        ui.selectable_value(
+                            &mut self.new_dimension,
+                            "3D".into(),
+                            "3D Nativo (Bevy/OpenGL)",
+                        );
                         ui.selectable_value(&mut self.new_dimension, "2D".into(), "2D");
                     });
                     ui.separator();
@@ -1984,7 +2200,9 @@ impl eframe::App for RevEngineApp {
                             if dep.installed {
                                 ui.label(egui::RichText::new("✔").color(success).strong());
                             } else {
-                                ui.label(egui::RichText::new("✖").color(egui::Color32::RED).strong());
+                                ui.label(
+                                    egui::RichText::new("✖").color(egui::Color32::RED).strong(),
+                                );
                             }
                             ui.label(egui::RichText::new(&dep.name).strong());
                             ui.label(&dep.version_info);
@@ -1993,12 +2211,16 @@ impl eframe::App for RevEngineApp {
 
                     ui.separator();
                     ui.horizontal(|ui| {
-                        if ui.button("Auto-Instalar Dependências Python (trimesh, pillow, numpy)").clicked() {
+                        if ui
+                            .button("Auto-Instalar Dependências Python (trimesh, pillow, numpy)")
+                            .clicked()
+                        {
                             match DependencyDoctor::auto_install_python_dependencies() {
                                 Ok(msg) => {
                                     self.status = msg.clone();
                                     self.log("INFO", &msg);
-                                    self.dependency_statuses = DependencyDoctor::check_all(&self.blender_path);
+                                    self.dependency_statuses =
+                                        DependencyDoctor::check_all(&self.blender_path);
                                 }
                                 Err(e) => {
                                     self.status = format!("Erro na instalação: {e}");
@@ -2007,7 +2229,8 @@ impl eframe::App for RevEngineApp {
                             }
                         }
                         if ui.button("Reverificar Tudo").clicked() {
-                            self.dependency_statuses = DependencyDoctor::check_all(&self.blender_path);
+                            self.dependency_statuses =
+                                DependencyDoctor::check_all(&self.blender_path);
                         }
                         if ui.button("Fechar").clicked() {
                             self.show_doctor = false;
@@ -2023,17 +2246,31 @@ impl eframe::App for RevEngineApp {
                 .show(ctx, |ui| {
                     if let Some(rep) = &self.optimizer_report {
                         ui.label(format!("• Entidades analisadas: {}", rep.entities_analyzed));
-                        ui.label(format!("• Corpos estáticos agrupados: {}", rep.static_batches));
-                        ui.label(format!("• Formas de física otimizadas: {}", rep.physics_shapes_optimized));
-                        ui.label(format!("• Texturas inspecionadas: {}", rep.textures_optimized));
-                        ui.label(format!("• Memória temporária liberada: {} KB", rep.memory_freed_kb));
+                        ui.label(format!(
+                            "• Corpos estáticos agrupados: {}",
+                            rep.static_batches
+                        ));
+                        ui.label(format!(
+                            "• Formas de física otimizadas: {}",
+                            rep.physics_shapes_optimized
+                        ));
+                        ui.label(format!(
+                            "• Texturas inspecionadas: {}",
+                            rep.textures_optimized
+                        ));
+                        ui.label(format!(
+                            "• Memória temporária liberada: {} KB",
+                            rep.memory_freed_kb
+                        ));
                         ui.separator();
                         ui.label("Detalhes das Otimizações Aplicadas:");
-                        egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                            for d in &rep.details {
-                                ui.label(format!("- {d}"));
-                            }
-                        });
+                        egui::ScrollArea::vertical()
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                for d in &rep.details {
+                                    ui.label(format!("- {d}"));
+                                }
+                            });
                     }
                     if ui.button("Fechar").clicked() {
                         self.show_optimizer = false;
@@ -2151,12 +2388,14 @@ fn configure_studio_visuals(ctx: &egui::Context) {
 
     // Widgets inactive
     visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(28, 34, 48);
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(48, 58, 80));
+    visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(48, 58, 80));
     visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(5);
 
     // Widgets hovered
     visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(42, 52, 74);
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(88, 145, 255));
+    visuals.widgets.hovered.bg_stroke =
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(88, 145, 255));
     visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(5);
 
     // Widgets active
@@ -2307,7 +2546,10 @@ mod tests {
         let export_path = UnityBridge::export_project(&scene, &temp_dir).unwrap();
         assert!(Path::new(&export_path).exists());
 
-        let unity_scene = Path::new(&export_path).join("Assets").join("Scenes").join("Main.unity");
+        let unity_scene = Path::new(&export_path)
+            .join("Assets")
+            .join("Scenes")
+            .join("Main.unity");
         assert!(unity_scene.is_file());
 
         let content = fs::read_to_string(&unity_scene).unwrap();
@@ -2351,11 +2593,18 @@ mod tests {
 
     #[test]
     fn test_procedural_medieval_scene_generation() {
-        let prompt = "Crie uma cena medieval completa com muralhas, tochas, terreno e castelo em 3D.";
+        let prompt =
+            "Crie uma cena medieval completa com muralhas, tochas, terreno e castelo em 3D.";
         let reply = "Cenário medieval completo criado com terreno extensivo, muralhas fortificadas, torres de vigia, tochas iluminando o perímetro e um castelo central.";
-        let scene = ProceduralSceneGenerator::match_or_generate_scene(prompt, reply).expect("Deve reconhecer o prompt medieval");
+        let scene = ProceduralSceneGenerator::match_or_generate_scene(prompt, reply)
+            .expect("Deve reconhecer o prompt medieval");
         assert!(scene.entities.len() >= 18);
-        assert!(scene.entities.iter().any(|e| e.name.contains("Castelo") || e.name.contains("Fortaleza")));
+        assert!(
+            scene
+                .entities
+                .iter()
+                .any(|e| e.name.contains("Castelo") || e.name.contains("Fortaleza"))
+        );
         assert!(scene.entities.iter().any(|e| e.name.contains("Muralha")));
         assert!(scene.entities.iter().any(|e| e.name.contains("Torre")));
         assert!(scene.entities.iter().any(|e| e.name.contains("Tocha")));
@@ -2365,9 +2614,15 @@ mod tests {
     #[test]
     fn test_doctor_godot_and_python_packages() {
         let godot_stat = DependencyDoctor::check_godot();
-        assert!(godot_stat.installed, "Godot CLI deve ser detectado após instalação");
+        assert!(
+            godot_stat.installed,
+            "Godot CLI deve ser detectado após instalação"
+        );
         let py_stat = DependencyDoctor::check_python_packages();
-        assert!(py_stat.installed, "Pacotes 3D Python (PIL, trimesh, numpy) devem ser validados");
+        assert!(
+            py_stat.installed,
+            "Pacotes 3D Python (PIL, trimesh, numpy) devem ser validados"
+        );
     }
 
     #[test]
@@ -2380,9 +2635,27 @@ mod tests {
 
         let roblox_dir = temp_dir.join("Integrations").join("Roblox");
         assert!(roblox_dir.join("default.project.json").is_file());
-        assert!(roblox_dir.join("src").join("server").join("GameManager.server.luau").is_file());
-        assert!(roblox_dir.join("src").join("client").join("CameraController.client.luau").is_file());
-        assert!(roblox_dir.join("src").join("shared").join("GameConfig.luau").is_file());
+        assert!(
+            roblox_dir
+                .join("src")
+                .join("server")
+                .join("GameManager.server.luau")
+                .is_file()
+        );
+        assert!(
+            roblox_dir
+                .join("src")
+                .join("client")
+                .join("CameraController.client.luau")
+                .is_file()
+        );
+        assert!(
+            roblox_dir
+                .join("src")
+                .join("shared")
+                .join("GameConfig.luau")
+                .is_file()
+        );
 
         let content = fs::read_to_string(&export_path).unwrap();
         assert!(content.contains("<roblox"));
@@ -2408,7 +2681,13 @@ mod tests {
         assert!(int_dir.join("Godot").exists());
         assert!(int_dir.join("Unity").exists());
         assert!(int_dir.join("Unreal").exists());
-        assert!(int_dir.join("CppNative").join("src").join("main.cpp").is_file());
+        assert!(
+            int_dir
+                .join("CppNative")
+                .join("src")
+                .join("main.cpp")
+                .is_file()
+        );
         assert!(int_dir.join("CppNative").join("CMakeLists.txt").is_file());
         assert!(int_dir.join("CSharp").join("Program.cs").is_file());
         assert!(int_dir.join("Lua").join("main.lua").is_file());
@@ -2420,9 +2699,15 @@ mod tests {
     fn test_procedural_roblox_obby_scene() {
         let prompt = "Crie um jogo de roblox com obby, lava e trofeu";
         let reply = "Jogo do roblox criado";
-        let scene = ProceduralSceneGenerator::match_or_generate_scene(prompt, reply).expect("Deve reconhecer prompt do Roblox");
+        let scene = ProceduralSceneGenerator::match_or_generate_scene(prompt, reply)
+            .expect("Deve reconhecer prompt do Roblox");
         assert!(scene.entities.len() >= 12);
-        assert!(scene.entities.iter().any(|e| e.name.contains("SpawnLocation")));
+        assert!(
+            scene
+                .entities
+                .iter()
+                .any(|e| e.name.contains("SpawnLocation"))
+        );
         assert!(scene.entities.iter().any(|e| e.name.contains("Lava")));
         assert!(scene.entities.iter().any(|e| e.name.contains("Trampolim")));
         assert!(scene.entities.iter().any(|e| e.name.contains("Trofeu")));

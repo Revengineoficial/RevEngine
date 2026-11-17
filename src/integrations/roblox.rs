@@ -151,8 +151,11 @@ setupAtmosphere()
 "#,
             scene.name
         );
-        fs::write(src_client.join("CameraController.client.luau"), client_script)
-            .map_err(|e| e.to_string())?;
+        fs::write(
+            src_client.join("CameraController.client.luau"),
+            client_script,
+        )
+        .map_err(|e| e.to_string())?;
 
         // 4. Generate ReplicatedStorage GameConfig Module
         let shared_config = format!(
@@ -174,8 +177,7 @@ return GameConfig
             scene.name,
             scene.entities.len()
         );
-        fs::write(src_shared.join("GameConfig.luau"), shared_config)
-            .map_err(|e| e.to_string())?;
+        fs::write(src_shared.join("GameConfig.luau"), shared_config).map_err(|e| e.to_string())?;
 
         // 5. Generate Official Roblox XML Place File (.rbxlx)
         // This is directly double-clickable and openable in Roblox Studio!
@@ -231,7 +233,11 @@ return GameConfig
                 (s[0], s[1], s[2])
             };
 
-            let name_clean = ent.name.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            let name_clean = ent
+                .name
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
 
             xml.push_str(&format!(
                 r#"		<Item class="Part" referent="RBX_{ref_id}">
@@ -262,19 +268,27 @@ return GameConfig
 				<float name="Reflectance">{:.2}</float>
 			</Properties>
 "#,
-                p[0], p[1], p[2],
-                sx, sy, sz,
-                c[0], c[1], c[2],
-                is_anchored,
-                ent.material.metallic
+                p[0], p[1], p[2], sx, sy, sz, c[0], c[1], c[2], is_anchored, ent.material.metallic
             ));
 
             // If the entity is a light or emissive, add PointLight child item
             if ent.kind == "light" || ent.material.emissive[0] > 0.1 {
                 ref_id += 1;
-                let light_color = ent.light.as_ref().map(|l| l.color).unwrap_or(ent.material.emissive);
-                let brightness = ent.light.as_ref().map(|l| (l.intensity * 0.002).clamp(1.0, 10.0)).unwrap_or(3.0);
-                let range = ent.light.as_ref().map(|l| l.range.clamp(8.0, 60.0)).unwrap_or(24.0);
+                let light_color = ent
+                    .light
+                    .as_ref()
+                    .map(|l| l.color)
+                    .unwrap_or(ent.material.emissive);
+                let brightness = ent
+                    .light
+                    .as_ref()
+                    .map(|l| (l.intensity * 0.002).clamp(1.0, 10.0))
+                    .unwrap_or(3.0);
+                let range = ent
+                    .light
+                    .as_ref()
+                    .map(|l| l.range.clamp(8.0, 60.0))
+                    .unwrap_or(24.0);
 
                 xml.push_str(&format!(
                     r#"			<Item class="PointLight" referent="RBX_{ref_id}">
@@ -289,15 +303,15 @@ return GameConfig
 				</Properties>
 			</Item>
 "#,
-                    light_color[0], light_color[1], light_color[2],
-                    brightness, range
+                    light_color[0], light_color[1], light_color[2], brightness, range
                 ));
             }
 
             xml.push_str("		</Item>\n");
         }
 
-        xml.push_str(r#"	</Item>
+        xml.push_str(
+            r#"	</Item>
 	<Item class="Lighting" referent="RBX_LIGHTING">
 		<Properties>
 			<string name="Name">Lighting</string>
@@ -337,7 +351,8 @@ print("◈ RevEngine Game Server ativo no Roblox Studio!")
 		</Properties>
 	</Item>
 </roblox>
-"#);
+"#,
+        );
 
         xml
     }
@@ -364,19 +379,70 @@ print("◈ RevEngine Game Server ativo no Roblox Studio!")
                 .to_string();
 
             // Extract position CFrame
-            let x: f32 = block.split("<X>").nth(1).and_then(|s| s.split("</X>").next()).and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let y: f32 = block.split("<Y>").nth(1).and_then(|s| s.split("</Y>").next()).and_then(|v| v.parse().ok()).unwrap_or(0.0);
-            let z: f32 = block.split("<Z>").nth(1).and_then(|s| s.split("</Z>").next()).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let x: f32 = block
+                .split("<X>")
+                .nth(1)
+                .and_then(|s| s.split("</X>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0);
+            let y: f32 = block
+                .split("<Y>")
+                .nth(1)
+                .and_then(|s| s.split("</Y>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0);
+            let z: f32 = block
+                .split("<Z>")
+                .nth(1)
+                .and_then(|s| s.split("</Z>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0);
 
             // Extract Size
-            let sx: f32 = block.split("<Vector3 name=\"size\">").nth(1).and_then(|s| s.split("<X>").nth(1)).and_then(|s| s.split("</X>").next()).and_then(|v| v.parse().ok()).unwrap_or(2.0);
-            let sy: f32 = block.split("<Vector3 name=\"size\">").nth(1).and_then(|s| s.split("<Y>").nth(1)).and_then(|s| s.split("</Y>").next()).and_then(|v| v.parse().ok()).unwrap_or(2.0);
-            let sz: f32 = block.split("<Vector3 name=\"size\">").nth(1).and_then(|s| s.split("<Z>").nth(1)).and_then(|s| s.split("</Z>").next()).and_then(|v| v.parse().ok()).unwrap_or(2.0);
+            let sx: f32 = block
+                .split("<Vector3 name=\"size\">")
+                .nth(1)
+                .and_then(|s| s.split("<X>").nth(1))
+                .and_then(|s| s.split("</X>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2.0);
+            let sy: f32 = block
+                .split("<Vector3 name=\"size\">")
+                .nth(1)
+                .and_then(|s| s.split("<Y>").nth(1))
+                .and_then(|s| s.split("</Y>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2.0);
+            let sz: f32 = block
+                .split("<Vector3 name=\"size\">")
+                .nth(1)
+                .and_then(|s| s.split("<Z>").nth(1))
+                .and_then(|s| s.split("</Z>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2.0);
 
             // Extract Color
-            let r: f32 = block.split("<Color3 name=\"Color\">").nth(1).and_then(|s| s.split("<R>").nth(1)).and_then(|s| s.split("</R>").next()).and_then(|v| v.parse().ok()).unwrap_or(0.7);
-            let g: f32 = block.split("<Color3 name=\"Color\">").nth(1).and_then(|s| s.split("<G>").nth(1)).and_then(|s| s.split("</G>").next()).and_then(|v| v.parse().ok()).unwrap_or(0.7);
-            let b: f32 = block.split("<Color3 name=\"Color\">").nth(1).and_then(|s| s.split("<B>").nth(1)).and_then(|s| s.split("</B>").next()).and_then(|v| v.parse().ok()).unwrap_or(0.7);
+            let r: f32 = block
+                .split("<Color3 name=\"Color\">")
+                .nth(1)
+                .and_then(|s| s.split("<R>").nth(1))
+                .and_then(|s| s.split("</R>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.7);
+            let g: f32 = block
+                .split("<Color3 name=\"Color\">")
+                .nth(1)
+                .and_then(|s| s.split("<G>").nth(1))
+                .and_then(|s| s.split("</G>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.7);
+            let b: f32 = block
+                .split("<Color3 name=\"Color\">")
+                .nth(1)
+                .and_then(|s| s.split("<B>").nth(1))
+                .and_then(|s| s.split("</B>").next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.7);
 
             let id = scene.alloc_id();
             let mut ent = Entity::new_cube(id, &name, [x, y, z], 1.0, [r, g, b, 1.0]);

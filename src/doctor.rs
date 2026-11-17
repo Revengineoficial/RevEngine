@@ -46,7 +46,8 @@ impl DependencyDoctor {
     }
 
     pub fn check_blender(configured_path: &str) -> DependencyStatus {
-        let is_valid = !configured_path.is_empty() && std::path::Path::new(configured_path).is_file();
+        let is_valid =
+            !configured_path.is_empty() && std::path::Path::new(configured_path).is_file();
         DependencyStatus {
             name: "Blender 3D Suite".into(),
             installed: is_valid,
@@ -55,7 +56,11 @@ impl DependencyDoctor {
             } else {
                 "Defina o caminho em Configurações".into()
             },
-            path: if is_valid { Some(configured_path.to_string()) } else { None },
+            path: if is_valid {
+                Some(configured_path.to_string())
+            } else {
+                None
+            },
         }
     }
 
@@ -92,7 +97,11 @@ impl DependencyDoctor {
         }
 
         // 2. Check workspace tools/godot
-        candidates.push(std::path::PathBuf::from("tools").join("godot").join("godot.exe"));
+        candidates.push(
+            std::path::PathBuf::from("tools")
+                .join("godot")
+                .join("godot.exe"),
+        );
         if let Ok(exe_dir) = std::env::current_exe() {
             if let Some(parent) = exe_dir.parent() {
                 candidates.push(parent.join("tools").join("godot").join("godot.exe"));
@@ -104,9 +113,16 @@ impl DependencyDoctor {
 
         // 3. Check well-known directories
         if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-            candidates.push(std::path::PathBuf::from(appdata).join("Programs").join("Godot").join("godot.exe"));
+            candidates.push(
+                std::path::PathBuf::from(appdata)
+                    .join("Programs")
+                    .join("Godot")
+                    .join("godot.exe"),
+            );
         }
-        candidates.push(std::path::PathBuf::from(r"C:\Program Files\Godot\godot.exe"));
+        candidates.push(std::path::PathBuf::from(
+            r"C:\Program Files\Godot\godot.exe",
+        ));
 
         for cand in candidates {
             if cand.is_file() {
@@ -166,7 +182,9 @@ impl DependencyDoctor {
             cmd.arg(p);
         }
 
-        let output = cmd.output().map_err(|e| format!("Falha ao executar pip: {e}"))?;
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Falha ao executar pip: {e}"))?;
         if output.status.success() {
             Ok("Dependências instaladas com sucesso: pillow, trimesh, numpy, watchdog!".into())
         } else {

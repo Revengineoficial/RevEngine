@@ -7,7 +7,8 @@ impl BlenderBridge {
     /// Generates a Python script that builds the current RevEngine scene inside Blender
     pub fn generate_blender_scene_script(scene: &Scene, output_glb: &Path) -> String {
         let mut py = String::new();
-        py.push_str(r#"import bpy, math
+        py.push_str(
+            r#"import bpy, math
 
 # Clear existing objects
 bpy.ops.object.select_all(action='SELECT')
@@ -23,7 +24,8 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
         bsdf.inputs["Roughness"].default_value = roughness
     return m
 
-"#);
+"#,
+        );
 
         for ent in &scene.entities {
             let p = ent.transform.position;
@@ -117,7 +119,10 @@ def create_mat(name, color, metallic=0.1, roughness=0.5):
         blender_exe: &str,
         project_dir: &Path,
     ) -> Result<String, String> {
-        let output_glb = project_dir.join("Assets").join("Generated").join("blender_scene.glb");
+        let output_glb = project_dir
+            .join("Assets")
+            .join("Generated")
+            .join("blender_scene.glb");
         if let Some(parent) = output_glb.parent() {
             let _ = fs::create_dir_all(parent);
         }

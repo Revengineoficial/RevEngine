@@ -1,6 +1,6 @@
 [package]
 name = "revengine"
-version = "0.2.0"
+version = "0.2.0-pre-alpha.1"
 edition = "2024"
 description = "RevEngine - indie 2D/3D game creation environment"
 

@@ -4,8 +4,8 @@ use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 #[derive(Clone, Debug)]
 pub struct Camera3D {
     pub target: [f32; 3],
-    pub yaw: f32,      // radians
-    pub pitch: f32,    // radians
+    pub yaw: f32,   // radians
+    pub pitch: f32, // radians
     pub distance: f32,
     pub fov_deg: f32,
     pub ortho: bool,
@@ -15,8 +15,8 @@ impl Default for Camera3D {
     fn default() -> Self {
         Self {
             target: [0.0, 1.0, 0.0],
-            yaw: 0.785,   // 45 degrees
-            pitch: 0.45,  // ~25 degrees
+            yaw: 0.785,  // 45 degrees
+            pitch: 0.45, // ~25 degrees
             distance: 12.0,
             fov_deg: 50.0,
             ortho: false,
@@ -162,7 +162,8 @@ impl ViewportRenderer {
         blender_preview: &Option<egui::TextureHandle>,
         accent: Color32,
     ) {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+        let (rect, response) =
+            ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
         let painter = ui.painter_at(rect);
 
         // 1. Draw Sleek Atmospheric Viewport Skybox
@@ -192,7 +193,8 @@ impl ViewportRenderer {
             } else {
                 // Orbit
                 self.camera.yaw -= delta.x * 0.007 * self.camera_speed;
-                self.camera.pitch = (self.camera.pitch + delta.y * 0.007 * self.camera_speed).clamp(-1.48, 1.48);
+                self.camera.pitch =
+                    (self.camera.pitch + delta.y * 0.007 * self.camera_speed).clamp(-1.48, 1.48);
             }
         } else if response.dragged_by(egui::PointerButton::Middle) {
             let delta = response.drag_delta();
@@ -205,7 +207,8 @@ impl ViewportRenderer {
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.0 {
-                self.camera.distance = (self.camera.distance - scroll * 0.02 * self.camera_speed).clamp(1.5, 140.0);
+                self.camera.distance =
+                    (self.camera.distance - scroll * 0.02 * self.camera_speed).clamp(1.5, 140.0);
             }
         }
 
@@ -217,12 +220,18 @@ impl ViewportRenderer {
         // 4. Draw Ground Contact Shadows under entities
         if self.show_ground_shadows {
             for ent in &scene.entities {
-                if ent.kind != "light" && ent.kind != "camera" && ent.kind != "plane" && ent.visible {
+                if ent.kind != "light" && ent.kind != "camera" && ent.kind != "plane" && ent.visible
+                {
                     let pos = ent.transform.position;
                     let shadow_center = self.project([pos[0], 0.01, pos[2]], rect);
                     if shadow_center.visible {
-                        let rad = (ent.transform.scale[0] * 22.0 / shadow_center.depth.max(1.0)).clamp(4.0, 80.0);
-                        painter.circle_filled(shadow_center.screen, rad, Color32::from_black_alpha(75));
+                        let rad = (ent.transform.scale[0] * 22.0 / shadow_center.depth.max(1.0))
+                            .clamp(4.0, 80.0);
+                        painter.circle_filled(
+                            shadow_center.screen,
+                            rad,
+                            Color32::from_black_alpha(75),
+                        );
                     }
                 }
             }
@@ -257,7 +266,11 @@ impl ViewportRenderer {
         }
 
         // Sort descending depth so further objects draw first
-        render_list.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+        render_list.sort_by(|a, b| {
+            b.depth
+                .partial_cmp(&a.depth)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         for item in &render_list {
             let ent = item.entity;
@@ -269,7 +282,10 @@ impl ViewportRenderer {
         if response.clicked_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 // Don't select if clicked the orientation compass in top-right
-                let compass_rect = Rect::from_min_size(rect.right_top() - Vec2::new(95.0, -10.0), Vec2::new(85.0, 85.0));
+                let compass_rect = Rect::from_min_size(
+                    rect.right_top() - Vec2::new(95.0, -10.0),
+                    Vec2::new(85.0, 85.0),
+                );
                 if !compass_rect.contains(pos) {
                     let mut best_id = None;
                     let mut min_dist = 32.0;
@@ -300,9 +316,17 @@ impl ViewportRenderer {
 
         // 9. Floating Top-Left Status Pill
         let (meshes, lights, cameras) = scene.stats();
-        let status_rect = Rect::from_min_size(rect.left_top() + Vec2::new(12.0, 12.0), Vec2::new(280.0, 52.0));
+        let status_rect = Rect::from_min_size(
+            rect.left_top() + Vec2::new(12.0, 12.0),
+            Vec2::new(280.0, 52.0),
+        );
         painter.rect_filled(status_rect, 6.0, Color32::from_black_alpha(170));
-        painter.rect_stroke(status_rect, 6.0_f32, Stroke::new(1.0_f32, Color32::from_white_alpha(30)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            status_rect,
+            6.0_f32,
+            Stroke::new(1.0_f32, Color32::from_white_alpha(30)),
+            egui::StrokeKind::Inside,
+        );
 
         painter.text(
             status_rect.left_top() + Vec2::new(10.0, 8.0),
@@ -332,7 +356,8 @@ impl ViewportRenderer {
 
         // Horizon subtle band
         let horizon_y = rect.center().y + (self.camera.pitch * 60.0);
-        let horizon_rect = Rect::from_min_max(Pos2::new(rect.left(), horizon_y), rect.right_bottom());
+        let horizon_rect =
+            Rect::from_min_max(Pos2::new(rect.left(), horizon_y), rect.right_bottom());
         painter.rect_filled(horizon_rect, 0.0, bot_color);
     }
 
@@ -347,33 +372,56 @@ impl ViewportRenderer {
             let p1 = self.project([fi, 0.0, -max_f], rect);
             let p2 = self.project([fi, 0.0, max_f], rect);
             if p1.visible && p2.visible {
-                let alpha = if i == 0 { 180 } else { (85 - (i.abs() * 5)).max(15) as u8 };
+                let alpha = if i == 0 {
+                    180
+                } else {
+                    (85 - (i.abs() * 5)).max(15) as u8
+                };
                 let col = if i == 0 {
                     Color32::from_rgba_unmultiplied(65, 125, 230, alpha)
                 } else {
                     Color32::from_rgba_unmultiplied(75, 90, 115, alpha)
                 };
-                painter.line_segment([p1.screen, p2.screen], Stroke::new(if i == 0 { 1.5_f32 } else { 0.6_f32 }, col));
+                painter.line_segment(
+                    [p1.screen, p2.screen],
+                    Stroke::new(if i == 0 { 1.5_f32 } else { 0.6_f32 }, col),
+                );
             }
 
             let q1 = self.project([-max_f, 0.0, fi], rect);
             let q2 = self.project([max_f, 0.0, fi], rect);
             if q1.visible && q2.visible {
-                let alpha = if i == 0 { 180 } else { (85 - (i.abs() * 5)).max(15) as u8 };
+                let alpha = if i == 0 {
+                    180
+                } else {
+                    (85 - (i.abs() * 5)).max(15) as u8
+                };
                 let col = if i == 0 {
                     Color32::from_rgba_unmultiplied(230, 75, 75, alpha)
                 } else {
                     Color32::from_rgba_unmultiplied(75, 90, 115, alpha)
                 };
-                painter.line_segment([q1.screen, q2.screen], Stroke::new(if i == 0 { 1.5_f32 } else { 0.6_f32 }, col));
+                painter.line_segment(
+                    [q1.screen, q2.screen],
+                    Stroke::new(if i == 0 { 1.5_f32 } else { 0.6_f32 }, col),
+                );
             }
         }
     }
 
-    fn draw_orientation_compass(&mut self, painter: &egui::Painter, rect: Rect, response: &egui::Response) {
+    fn draw_orientation_compass(
+        &mut self,
+        painter: &egui::Painter,
+        rect: Rect,
+        response: &egui::Response,
+    ) {
         let center = rect.right_top() + Vec2::new(-45.0, 45.0);
         painter.circle_filled(center, 34.0, Color32::from_black_alpha(150));
-        painter.circle_stroke(center, 34.0, Stroke::new(1.0_f32, Color32::from_white_alpha(40)));
+        painter.circle_stroke(
+            center,
+            34.0,
+            Stroke::new(1.0_f32, Color32::from_white_alpha(40)),
+        );
 
         // Camera rotation angles
         let cos_p = self.camera.pitch.cos();
@@ -385,21 +433,48 @@ impl ViewportRenderer {
 
         // X axis projection in compass
         let x_screen = center + Vec2::new(cos_y * arm_len, sin_y * sin_p * arm_len);
-        painter.line_segment([center, x_screen], Stroke::new(2.5_f32, Color32::from_rgb(235, 65, 65)));
+        painter.line_segment(
+            [center, x_screen],
+            Stroke::new(2.5_f32, Color32::from_rgb(235, 65, 65)),
+        );
         painter.circle_filled(x_screen, 4.5, Color32::from_rgb(235, 65, 65));
-        painter.text(x_screen, egui::Align2::CENTER_CENTER, "X", egui::FontId::proportional(9.0), Color32::WHITE);
+        painter.text(
+            x_screen,
+            egui::Align2::CENTER_CENTER,
+            "X",
+            egui::FontId::proportional(9.0),
+            Color32::WHITE,
+        );
 
         // Y axis (Up)
         let y_screen = center + Vec2::new(0.0, -cos_p * arm_len);
-        painter.line_segment([center, y_screen], Stroke::new(2.5_f32, Color32::from_rgb(65, 220, 85)));
+        painter.line_segment(
+            [center, y_screen],
+            Stroke::new(2.5_f32, Color32::from_rgb(65, 220, 85)),
+        );
         painter.circle_filled(y_screen, 4.5, Color32::from_rgb(65, 220, 85));
-        painter.text(y_screen, egui::Align2::CENTER_CENTER, "Y", egui::FontId::proportional(9.0), Color32::WHITE);
+        painter.text(
+            y_screen,
+            egui::Align2::CENTER_CENTER,
+            "Y",
+            egui::FontId::proportional(9.0),
+            Color32::WHITE,
+        );
 
         // Z axis (Forward/Depth)
         let z_screen = center + Vec2::new(-sin_y * arm_len, cos_y * sin_p * arm_len);
-        painter.line_segment([center, z_screen], Stroke::new(2.5_f32, Color32::from_rgb(65, 130, 245)));
+        painter.line_segment(
+            [center, z_screen],
+            Stroke::new(2.5_f32, Color32::from_rgb(65, 130, 245)),
+        );
         painter.circle_filled(z_screen, 4.5, Color32::from_rgb(65, 130, 245));
-        painter.text(z_screen, egui::Align2::CENTER_CENTER, "Z", egui::FontId::proportional(9.0), Color32::WHITE);
+        painter.text(
+            z_screen,
+            egui::Align2::CENTER_CENTER,
+            "Z",
+            egui::FontId::proportional(9.0),
+            Color32::WHITE,
+        );
 
         // Click to snap views
         if response.clicked_by(egui::PointerButton::Primary) {
@@ -446,7 +521,11 @@ impl ViewportRenderer {
         match ent.kind.as_str() {
             "cube" | "plane" | "model" => {
                 let hx = scale[0] * 0.5;
-                let hy = if ent.kind == "plane" { 0.05 } else { scale[1] * 0.5 };
+                let hy = if ent.kind == "plane" {
+                    0.05
+                } else {
+                    scale[1] * 0.5
+                };
                 let hz = scale[2] * 0.5;
 
                 // 8 corners of the 3D box
@@ -529,7 +608,11 @@ impl ViewportRenderer {
             "light" => {
                 let center = self.project(pos, rect);
                 if center.visible {
-                    let light_c = ent.light.as_ref().map(|l| l.color).unwrap_or([1.0, 0.9, 0.4]);
+                    let light_c = ent
+                        .light
+                        .as_ref()
+                        .map(|l| l.color)
+                        .unwrap_or([1.0, 0.9, 0.4]);
                     let col = Color32::from_rgb(
                         (light_c[0] * 255.0) as u8,
                         (light_c[1] * 255.0) as u8,
@@ -555,7 +638,10 @@ impl ViewportRenderer {
                     painter.circle_filled(center.screen, 7.0, col);
                     let forward_p = self.project([pos[0], pos[1] - 0.5, pos[2] - 3.0], rect);
                     if forward_p.visible {
-                        painter.line_segment([center.screen, forward_p.screen], Stroke::new(1.5_f32, col));
+                        painter.line_segment(
+                            [center.screen, forward_p.screen],
+                            Stroke::new(1.5_f32, col),
+                        );
                         painter.rect_stroke(
                             Rect::from_center_size(forward_p.screen, Vec2::new(32.0, 20.0)),
                             2.0,
@@ -577,7 +663,11 @@ impl ViewportRenderer {
         // Entity name tag with rounded background badge
         let center = self.project([pos[0], pos[1] + scale[1] * 0.6 + 0.35, pos[2]], rect);
         if center.visible {
-            let label_col = if is_selected { accent } else { Color32::from_gray(210) };
+            let label_col = if is_selected {
+                accent
+            } else {
+                Color32::from_gray(210)
+            };
             painter.text(
                 center.screen,
                 egui::Align2::CENTER_BOTTOM,
@@ -603,39 +693,81 @@ impl ViewportRenderer {
             TransformToolMode::Translate => {
                 // X Axis (Red)
                 if px.visible {
-                    painter.line_segment([center.screen, px.screen], Stroke::new(2.5_f32, Color32::from_rgb(240, 60, 60)));
+                    painter.line_segment(
+                        [center.screen, px.screen],
+                        Stroke::new(2.5_f32, Color32::from_rgb(240, 60, 60)),
+                    );
                     painter.circle_filled(px.screen, 4.5, Color32::from_rgb(240, 60, 60));
                 }
                 // Y Axis (Green)
                 if py.visible {
-                    painter.line_segment([center.screen, py.screen], Stroke::new(2.5_f32, Color32::from_rgb(60, 220, 80)));
+                    painter.line_segment(
+                        [center.screen, py.screen],
+                        Stroke::new(2.5_f32, Color32::from_rgb(60, 220, 80)),
+                    );
                     painter.circle_filled(py.screen, 4.5, Color32::from_rgb(60, 220, 80));
                 }
                 // Z Axis (Blue)
                 if pz.visible {
-                    painter.line_segment([center.screen, pz.screen], Stroke::new(2.5_f32, Color32::from_rgb(60, 130, 255)));
+                    painter.line_segment(
+                        [center.screen, pz.screen],
+                        Stroke::new(2.5_f32, Color32::from_rgb(60, 130, 255)),
+                    );
                     painter.circle_filled(pz.screen, 4.5, Color32::from_rgb(60, 130, 255));
                 }
             }
             TransformToolMode::Rotate => {
                 // Draw 3 rotational rings around center
-                painter.circle_stroke(center.screen, 32.0, Stroke::new(1.8_f32, Color32::from_rgb(240, 60, 60)));
-                painter.circle_stroke(center.screen, 24.0, Stroke::new(1.8_f32, Color32::from_rgb(60, 220, 80)));
-                painter.circle_stroke(center.screen, 16.0, Stroke::new(1.8_f32, Color32::from_rgb(60, 130, 255)));
+                painter.circle_stroke(
+                    center.screen,
+                    32.0,
+                    Stroke::new(1.8_f32, Color32::from_rgb(240, 60, 60)),
+                );
+                painter.circle_stroke(
+                    center.screen,
+                    24.0,
+                    Stroke::new(1.8_f32, Color32::from_rgb(60, 220, 80)),
+                );
+                painter.circle_stroke(
+                    center.screen,
+                    16.0,
+                    Stroke::new(1.8_f32, Color32::from_rgb(60, 130, 255)),
+                );
             }
             TransformToolMode::Scale => {
                 // Draw cube-ended scale axes
                 if px.visible {
-                    painter.line_segment([center.screen, px.screen], Stroke::new(2.5_f32, Color32::from_rgb(240, 60, 60)));
-                    painter.rect_filled(Rect::from_center_size(px.screen, Vec2::new(7.0, 7.0)), 1.0, Color32::from_rgb(240, 60, 60));
+                    painter.line_segment(
+                        [center.screen, px.screen],
+                        Stroke::new(2.5_f32, Color32::from_rgb(240, 60, 60)),
+                    );
+                    painter.rect_filled(
+                        Rect::from_center_size(px.screen, Vec2::new(7.0, 7.0)),
+                        1.0,
+                        Color32::from_rgb(240, 60, 60),
+                    );
                 }
                 if py.visible {
-                    painter.line_segment([center.screen, py.screen], Stroke::new(2.5_f32, Color32::from_rgb(60, 220, 80)));
-                    painter.rect_filled(Rect::from_center_size(py.screen, Vec2::new(7.0, 7.0)), 1.0, Color32::from_rgb(60, 220, 80));
+                    painter.line_segment(
+                        [center.screen, py.screen],
+                        Stroke::new(2.5_f32, Color32::from_rgb(60, 220, 80)),
+                    );
+                    painter.rect_filled(
+                        Rect::from_center_size(py.screen, Vec2::new(7.0, 7.0)),
+                        1.0,
+                        Color32::from_rgb(60, 220, 80),
+                    );
                 }
                 if pz.visible {
-                    painter.line_segment([center.screen, pz.screen], Stroke::new(2.5_f32, Color32::from_rgb(60, 130, 255)));
-                    painter.rect_filled(Rect::from_center_size(pz.screen, Vec2::new(7.0, 7.0)), 1.0, Color32::from_rgb(60, 130, 255));
+                    painter.line_segment(
+                        [center.screen, pz.screen],
+                        Stroke::new(2.5_f32, Color32::from_rgb(60, 130, 255)),
+                    );
+                    painter.rect_filled(
+                        Rect::from_center_size(pz.screen, Vec2::new(7.0, 7.0)),
+                        1.0,
+                        Color32::from_rgb(60, 130, 255),
+                    );
                 }
             }
         }

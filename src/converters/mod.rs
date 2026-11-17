@@ -66,8 +66,14 @@ impl UniversalConverter {
                 fs::copy(source_path, &dest_file)
                     .map_err(|e| format!("Falha ao copiar script Luau: {e}"))?;
 
-                let rel_path = format!("Scripts/Roblox/{}", source_path.file_name().unwrap().to_string_lossy());
-                Ok(format!("Script Luau / Lua '{}' importado para '{}'!", file_stem, rel_path))
+                let rel_path = format!(
+                    "Scripts/Roblox/{}",
+                    source_path.file_name().unwrap().to_string_lossy()
+                );
+                Ok(format!(
+                    "Script Luau / Lua '{}' importado para '{}'!",
+                    file_stem, rel_path
+                ))
             }
 
             // 3. 3D Model Formats (.glb, .gltf, .obj, .fbx)
@@ -79,10 +85,14 @@ impl UniversalConverter {
                 fs::copy(source_path, &dest_file)
                     .map_err(|e| format!("Falha ao copiar modelo 3D: {e}"))?;
 
-                let rel_path = format!("Assets/Models/{}", source_path.file_name().unwrap().to_string_lossy());
+                let rel_path = format!(
+                    "Assets/Models/{}",
+                    source_path.file_name().unwrap().to_string_lossy()
+                );
                 let id = scene.alloc_id();
 
-                let mut ent = Entity::new_cube(id, file_stem, [0.0, 1.0, 0.0], 1.0, [0.8, 0.8, 0.85, 1.0]);
+                let mut ent =
+                    Entity::new_cube(id, file_stem, [0.0, 1.0, 0.0], 1.0, [0.8, 0.8, 0.85, 1.0]);
                 ent.kind = "model".into();
                 ent.model_path = Some(rel_path.clone());
                 scene.add_entity(ent);
@@ -117,7 +127,10 @@ impl UniversalConverter {
                 fs::copy(source_path, &dest_file)
                     .map_err(|e| format!("Falha ao copiar script: {e}"))?;
 
-                let rel_path = format!("Scripts/{}", source_path.file_name().unwrap().to_string_lossy());
+                let rel_path = format!(
+                    "Scripts/{}",
+                    source_path.file_name().unwrap().to_string_lossy()
+                );
 
                 Ok(format!(
                     "Script Python / Cave Engine '{}' importado para '{}'. Compatível com componentes RevEngine!",
@@ -128,7 +141,10 @@ impl UniversalConverter {
             // 6. Native RevEngine Scene (.json / .rev)
             "json" | "rev" => {
                 scene.load_from_file(source_path)?;
-                Ok(format!("Cena '{}' carregada com sucesso!", source_path.display()))
+                Ok(format!(
+                    "Cena '{}' carregada com sucesso!",
+                    source_path.display()
+                ))
             }
 
             // 7. Textures (.png, .jpg, .jpeg, .tga, .bmp)
@@ -146,7 +162,10 @@ impl UniversalConverter {
                 ))
             }
 
-            _ => Err(format!("Formato '.{}' não reconhecido para conversão automática.", ext)),
+            _ => Err(format!(
+                "Formato '.{}' não reconhecido para conversão automática.",
+                ext
+            )),
         }
     }
 }

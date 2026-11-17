@@ -116,7 +116,12 @@ anti_aliasing/quality/msaa_3d=2
         let mut current_pos = [0.0, 0.0, 0.0];
         let mut current_scale = [1.0, 1.0, 1.0];
 
-        let flush_node = |scene: &mut Scene, name: &str, n_type: &str, pos: [f32; 3], scale: [f32; 3]| -> bool {
+        let flush_node = |scene: &mut Scene,
+                          name: &str,
+                          n_type: &str,
+                          pos: [f32; 3],
+                          scale: [f32; 3]|
+         -> bool {
             if name.is_empty() || name == "Main" || name == "MeshInstance3D" {
                 return false;
             }
@@ -127,7 +132,8 @@ anti_aliasing/quality/msaa_3d=2
                 }
                 "Camera3D" => Entity::new_camera(id, name, pos),
                 "StaticBody3D" => {
-                    let mut e = Entity::new_cube(id, name, pos, scale[0].max(1.0), [0.3, 0.4, 0.6, 1.0]);
+                    let mut e =
+                        Entity::new_cube(id, name, pos, scale[0].max(1.0), [0.3, 0.4, 0.6, 1.0]);
                     e.physics.body_type = "Static".into();
                     e
                 }
@@ -141,7 +147,13 @@ anti_aliasing/quality/msaa_3d=2
         for line in tscn_content.lines() {
             let line = line.trim();
             if line.starts_with("[node ") {
-                if flush_node(scene, &current_node_name, &current_type, current_pos, current_scale) {
+                if flush_node(
+                    scene,
+                    &current_node_name,
+                    &current_type,
+                    current_pos,
+                    current_scale,
+                ) {
                     count += 1;
                 }
                 current_node_name.clear();
@@ -158,8 +170,13 @@ anti_aliasing/quality/msaa_3d=2
                     }
                 }
             } else if line.starts_with("transform = Transform3D(") {
-                let inner = line.trim_start_matches("transform = Transform3D(").trim_end_matches(')');
-                let nums: Vec<f32> = inner.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+                let inner = line
+                    .trim_start_matches("transform = Transform3D(")
+                    .trim_end_matches(')');
+                let nums: Vec<f32> = inner
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
                 if nums.len() >= 12 {
                     // Extract scale magnitude from basis vectors
                     let sx = (nums[0] * nums[0] + nums[1] * nums[1] + nums[2] * nums[2]).sqrt();
@@ -171,7 +188,13 @@ anti_aliasing/quality/msaa_3d=2
             }
         }
 
-        if flush_node(scene, &current_node_name, &current_type, current_pos, current_scale) {
+        if flush_node(
+            scene,
+            &current_node_name,
+            &current_type,
+            current_pos,
+            current_scale,
+        ) {
             count += 1;
         }
 

@@ -261,7 +261,14 @@ impl Entity {
         }
     }
 
-    pub fn new_light(id: u64, name: &str, pos: [f32; 3], light_type: &str, color: [f32; 3], intensity: f32) -> Self {
+    pub fn new_light(
+        id: u64,
+        name: &str,
+        pos: [f32; 3],
+        light_type: &str,
+        color: [f32; 3],
+        intensity: f32,
+    ) -> Self {
         Self {
             id,
             name: name.into(),
@@ -371,11 +378,30 @@ impl Default for Scene {
         let id1 = scene.alloc_id();
         scene.add_entity(Entity::new_camera(id1, "MainCamera", [0.0, 4.0, 10.0]));
         let id2 = scene.alloc_id();
-        scene.add_entity(Entity::new_light(id2, "SunLight", [5.0, 8.0, 5.0], "directional", [1.0, 0.95, 0.85], 14000.0));
+        scene.add_entity(Entity::new_light(
+            id2,
+            "SunLight",
+            [5.0, 8.0, 5.0],
+            "directional",
+            [1.0, 0.95, 0.85],
+            14000.0,
+        ));
         let id3 = scene.alloc_id();
-        scene.add_entity(Entity::new_plane(id3, "Ground", [0.0, 0.0, 0.0], 20.0, [0.12, 0.15, 0.22, 1.0]));
+        scene.add_entity(Entity::new_plane(
+            id3,
+            "Ground",
+            [0.0, 0.0, 0.0],
+            20.0,
+            [0.12, 0.15, 0.22, 1.0],
+        ));
         let id4 = scene.alloc_id();
-        scene.add_entity(Entity::new_cube(id4, "HeroCube", [0.0, 1.0, 0.0], 1.8, [0.15, 0.45, 0.9, 1.0]));
+        scene.add_entity(Entity::new_cube(
+            id4,
+            "HeroCube",
+            [0.0, 1.0, 0.0],
+            1.8,
+            [0.15, 0.45, 0.9, 1.0],
+        ));
 
         scene
     }
@@ -426,7 +452,9 @@ impl Scene {
                     scale: e.transform.scale[0],
                 });
             } else if e.kind != "camera" && e.kind != "light" && e.kind != "empty" {
-                let size = e.transform.scale[0].max(e.transform.scale[1]).max(e.transform.scale[2]);
+                let size = e.transform.scale[0]
+                    .max(e.transform.scale[1])
+                    .max(e.transform.scale[2]);
                 file.objects.push(BevyObjectEntry {
                     name: e.name.clone(),
                     kind: e.kind.clone(),
@@ -455,7 +483,14 @@ impl Scene {
         let cam_id = self.alloc_id();
         self.add_entity(Entity::new_camera(cam_id, "MainCamera", [0.0, 4.0, 10.0]));
         let light_id = self.alloc_id();
-        self.add_entity(Entity::new_light(light_id, "SunLight", [5.0, 8.0, 5.0], "directional", [1.0, 0.95, 0.85], 14000.0));
+        self.add_entity(Entity::new_light(
+            light_id,
+            "SunLight",
+            [5.0, 8.0, 5.0],
+            "directional",
+            [1.0, 0.95, 0.85],
+            14000.0,
+        ));
 
         for obj in file.objects {
             let id = self.alloc_id();
@@ -508,7 +543,8 @@ impl Scene {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        fs::write(path, json).map_err(|e| format!("Erro ao gravar arquivo de cena '{}': {e}", path.display()))
+        fs::write(path, json)
+            .map_err(|e| format!("Erro ao gravar arquivo de cena '{}': {e}", path.display()))
     }
 
     pub fn load_from_file(&mut self, path: &Path) -> Result<(), String> {

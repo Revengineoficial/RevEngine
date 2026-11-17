@@ -24,7 +24,9 @@ impl AutoOptimizer {
             for s in &mut ent.transform.scale {
                 if *s <= 0.001 || s.is_nan() {
                     *s = 1.0;
-                    report.details.push(format!("Normalizada escala inválida em '{}'", ent.name));
+                    report
+                        .details
+                        .push(format!("Normalizada escala inválida em '{}'", ent.name));
                 }
             }
 
@@ -40,7 +42,10 @@ impl AutoOptimizer {
                 if ent.physics.body_type != "Static" {
                     ent.physics.body_type = "Static".into();
                     report.physics_shapes_optimized += 1;
-                    report.details.push(format!("Corpo rígido de '{}' otimizado para 'Static' (economiza CPU Rapier/PhysX)", ent.name));
+                    report.details.push(format!(
+                        "Corpo rígido de '{}' otimizado para 'Static' (economiza CPU Rapier/PhysX)",
+                        ent.name
+                    ));
                 }
                 report.static_batches += 1;
             }

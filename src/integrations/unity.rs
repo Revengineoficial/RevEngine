@@ -16,7 +16,8 @@ impl UnityBridge {
 
         // 1. ProjectVersion.txt
         let version_txt = "m_EditorVersion: 2022.3.20f1\nm_EditorVersionWithRevision: 2022.3.20f1 (e30498b31a47)\n";
-        fs::write(settings_dir.join("ProjectVersion.txt"), version_txt).map_err(|e| e.to_string())?;
+        fs::write(settings_dir.join("ProjectVersion.txt"), version_txt)
+            .map_err(|e| e.to_string())?;
 
         // 2. Generate Main.unity YAML
         let mut yaml = String::new();
@@ -56,16 +57,18 @@ impl UnityBridge {
         let mut current_pos = [0.0, 0.0, 0.0];
         let mut current_scale = [1.0, 1.0, 1.0];
 
-        let flush_entity = |scene: &mut Scene, name: &str, pos: [f32; 3], scale: [f32; 3]| -> bool {
-            if name.is_empty() || name == "Main Camera" || name == "Directional Light" {
-                return false;
-            }
-            let id = scene.alloc_id();
-            let mut ent = Entity::new_cube(id, name, pos, scale[0].max(1.0), [0.22, 0.65, 0.85, 1.0]);
-            ent.transform.scale = scale;
-            scene.add_entity(ent);
-            true
-        };
+        let flush_entity =
+            |scene: &mut Scene, name: &str, pos: [f32; 3], scale: [f32; 3]| -> bool {
+                if name.is_empty() || name == "Main Camera" || name == "Directional Light" {
+                    return false;
+                }
+                let id = scene.alloc_id();
+                let mut ent =
+                    Entity::new_cube(id, name, pos, scale[0].max(1.0), [0.22, 0.65, 0.85, 1.0]);
+                ent.transform.scale = scale;
+                scene.add_entity(ent);
+                true
+            };
 
         for line in content.lines() {
             let line = line.trim();

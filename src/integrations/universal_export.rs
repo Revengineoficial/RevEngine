@@ -14,7 +14,11 @@ impl UniversalEngineExporter {
     /// Exports the scene to every supported game engine and programming language runtime:
     /// Roblox (.rbxlx + Luau), Godot (.tscn), Unity (.unity + C#), Unreal (.uproject + Python/C++),
     /// Standalone C++ (OpenGL 3D Motor), C# (.NET 8 3D), and Pure Lua.
-    pub fn export_all_targets(scene: &Scene, root: &Path, blender_exe: &str) -> Result<ExportSummary, String> {
+    pub fn export_all_targets(
+        scene: &Scene,
+        root: &Path,
+        blender_exe: &str,
+    ) -> Result<ExportSummary, String> {
         let mut engines = Vec::new();
         let mut total_files = 0;
 
@@ -294,7 +298,8 @@ namespace RevEngine.Runtime
             ));
         }
 
-        cs_code.push_str(r#"            };
+        cs_code.push_str(
+            r#"            };
 
             Console.WriteLine($"◈ Cena carregada com {entities.Count} entidades 3D ativas.");
             foreach (var ent in entities)
@@ -305,7 +310,8 @@ namespace RevEngine.Runtime
         }
     }
 }
-"#);
+"#,
+        );
         fs::write(cs_dir.join("Program.cs"), cs_code).map_err(|e| e.to_string())?;
 
         Ok(2)

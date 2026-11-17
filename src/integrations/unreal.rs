@@ -29,12 +29,16 @@ impl UnrealBridge {
 }}
 "#
         );
-        fs::write(ue_dir.join(format!("{}.uproject", scene.name.replace(' ', "_"))), uproject)
-            .map_err(|e| e.to_string())?;
+        fs::write(
+            ue_dir.join(format!("{}.uproject", scene.name.replace(' ', "_"))),
+            uproject,
+        )
+        .map_err(|e| e.to_string())?;
 
         // 2. Generate Python automation script to spawn actors in Unreal Editor
         let mut py = String::new();
-        py.push_str(r#"""
+        py.push_str(
+            r#"""
 RevEngine to Unreal Engine 5 Scene Importer
 Run this script inside Unreal Editor:
 Output Log -> Cmd -> py "path/to/unreal_import_scene.py"
@@ -48,7 +52,8 @@ def build_scene():
     editor_actor_lib = unreal.EditorActorSubsystem()
 
     print("◈ RevEngine: Spawning scene entities in Unreal Engine...")
-"#);
+"#,
+        );
 
         for ent in &scene.entities {
             let p = ent.transform.position;
